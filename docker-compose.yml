@@ -1,5 +1,4 @@
 services:
-  # Your Python App
   api:
     build: .
     container_name: api

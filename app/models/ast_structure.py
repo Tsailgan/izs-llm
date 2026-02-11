@@ -619,10 +619,6 @@ class NextflowPipelineAST(BaseModel):
                 if is_assign and stmt.get('variable'):
                     current_scope.add(stmt.get('variable'))
 
-                if is_call and inputs:
-                    if stmt.get('process_name') in sub_wf_names: 
-                        continue
-
                 if is_call:
                     args = stmt.get('args', [])
                     new_args = []
