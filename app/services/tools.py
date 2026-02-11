@@ -1,4 +1,5 @@
 import json
+import re
 from app.core.loader import data_loader
 from app.services.graph_state import GraphState
 
@@ -105,6 +106,42 @@ def retrieve_rag_context(user_query, embed_code=False):
 
     return final_context
 
+def suppress_workflow_body(code: str, target_names: list = None) -> str:
+    if not code: return ""
+    
+    # Regex to find 'workflow [name] {'
+    pattern = re.compile(r'\bworkflow\s+([a-zA-Z0-9_]+)?\s*\{')
+    
+    matches = list(pattern.finditer(code))
+    if not matches: return code
+
+    for match in reversed(matches):
+        name = match.group(1) # None if unnamed, "str" if named
+        start_idx = match.end() - 1 
+        
+        should_suppress = False
+        
+        # Rule 1: Always clean up unnamed entrypoints when importing as a library
+        if name is None:
+            should_suppress = True
+        # Rule 2: Suppress specific named workflows (the logic we want to overwrite)
+        elif target_names and name in target_names:
+            should_suppress = True
+            
+        if should_suppress:
+            balance = 1
+            i = start_idx + 1
+            while i < len(code) and balance > 0:
+                if code[i] == '{': balance += 1
+                elif code[i] == '}': balance -= 1
+                i += 1
+            end_idx = i - 1
+            
+            replacement = "\n    // *** LOGIC REMOVED BY HYDRATOR ***\n    // Definitions (inputs/emit) are valid, but logic body is hidden.\n"
+            code = code[:start_idx+1] + replacement + code[end_idx:]
+            
+    return code
+
 def hydrator_node(state: GraphState):
     print("--- [NODE] HYDRATOR (Context Assembly) ---")
     
@@ -172,8 +209,40 @@ def hydrator_node(state: GraphState):
 
             if tmpl_code:
 
-                context_parts.append(f"[[TEMPLATE SOURCE CODE: {used_template_id}]]")
-                context_parts.append(f"```groovy\n{tmpl_code.strip()}\n```")
+                targets_to_suppress = []
+
+                if workflow_logic:
+                    # Build list of valid aliases for the template
+                    valid_aliases = {used_template_id} 
+                    for comp in components:
+                        if comp.get('component_id') == used_template_id:
+                            valid_aliases.add(comp.get('process_alias'))
+
+                    # Check if logic invokes any of these aliases
+                    is_invoked = False
+                    for step in workflow_logic:
+                        snippet = step.get('code_snippet', '')
+                        for alias in valid_aliases:
+                            if f"{alias}(" in snippet or f"{alias} (" in snippet:
+                                is_invoked = True
+                                break
+                        if is_invoked: break
+                    
+                    # If NOT invoked, suppress the named workflow
+                    if not is_invoked:
+                        targets_to_suppress.append(used_template_id)
+
+                sanitized_code = suppress_workflow_body(tmpl_code, target_names=targets_to_suppress)
+                
+                context_parts.append(f"[[TEMPLATE DEFINITIONS: {used_template_id}]]")
+                if targets_to_suppress:
+                    context_parts.append("INFO: Old logic removed to force fresh rewrite (Anti-Hallucination).")
+                else:
+                    context_parts.append("INFO: Template body PRESERVED because it is invoked in the plan.")
+                    
+                context_parts.append(f"```groovy\n{sanitized_code.strip()}\n```")
+                context_parts.append(f"[[END TEMPLATE DEFINITIONS]]")
+
                 for h in HELPER_NAMES:
                     if h in tmpl_code: detected_helpers.add(h)
         else:
@@ -185,6 +254,10 @@ def hydrator_node(state: GraphState):
             
             if source_type == "RAG_COMPONENT":
                 comp_id = comp.get('component_id')
+
+                if comp_id == used_template_id and strategy == "ADAPTED_MATCH":
+                    continue
+
                 source_code = CODE_DB.get(comp_id)
                 
                 if source_code:
