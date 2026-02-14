@@ -8,6 +8,9 @@ class ComponentDef(BaseModel):
     source_description: Optional[str] = Field(None, description="Brief description of what this component does.")
     component_id: Optional[str] = Field(None, description="The RAG ID. REQUIRED if source_type is RAG_COMPONENT. Must be NULL if source_type is CUSTOM_SCRIPT.")
 
+    input_type: Optional[str] = Field(None, description="The primary input data format (e.g., 'FastQ', 'BAM', 'VCF').")
+    output_type: Optional[str] = Field(None, description="The primary output data format (e.g., 'BAM', 'HTML', 'TXT').")
+
 # --- Logic Definition ---
 class LogicStep(BaseModel):
     step_type: Literal["PROCESS_RUN", "OPERATOR", "COMMENT"]
@@ -28,10 +31,20 @@ class PipelinePlan(BaseModel):
                 "strategy_selector": "CUSTOM_BUILD",
                 "used_template_id": None,
                 "components": [
-                    # RAG Component (Has ID)
-                    {"process_alias": "fastqc", "source_type": "RAG_COMPONENT", "component_id": "tool_fastqc_v1"},
-                    # Custom Script (No ID)
-                    {"process_alias": "custom_parser", "source_type": "CUSTOM_SCRIPT", "component_id": None}
+                    {
+                        "process_alias": "fastqc", 
+                        "source_type": "RAG_COMPONENT", 
+                        "component_id": "tool_fastqc_v1",
+                        "input_type": "FastQ",
+                        "output_type": "HTML"
+                    },
+                    {
+                        "process_alias": "custom_parser", 
+                        "source_type": "CUSTOM_SCRIPT", 
+                        "component_id": None,
+                        "input_type": "HTML",
+                        "output_type": "JSON"
+                    }
                 ],
                 "workflow_logic": [
                     {"step_type": "PROCESS_RUN", "description": "Run QC", "code_snippet": "fastqc(input)"},

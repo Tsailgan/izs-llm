@@ -40,9 +40,27 @@ Follow these steps strictly.
     "strategy_selector": "ADAPTED_MATCH",
     "used_template_id": "module_viral_mapper",
     "components": [
-    {{ "process_alias": "mapper", "source_type": "RAG_COMPONENT", "component_id": "tool_bwa" }},
-    {{ "process_alias": "caller", "source_type": "RAG_COMPONENT", "component_id": "tool_gatk" }},
-    {{ "process_alias": "my_filter", "source_type": "CUSTOM_SCRIPT", "component_id": null }}
+    {{ 
+        "process_alias": "mapper", 
+        "source_type": "RAG_COMPONENT", 
+        "component_id": "tool_bwa",
+        "input_type": "FastQ",
+        "output_type": "BAM"
+    }},
+    {{ 
+        "process_alias": "caller", 
+        "source_type": "RAG_COMPONENT", 
+        "component_id": "tool_gatk",
+        "input_type": "BAM",
+        "output_type": "VCF"
+    }},
+    {{ 
+        "process_alias": "my_filter", 
+        "source_type": "CUSTOM_SCRIPT", 
+        "component_id": null,
+        "input_type": "VCF",
+        "output_type": "Filtered_VCF"
+    }}
     ],
     "workflow_logic": [
     {{ "step_type": "PROCESS_RUN", "description": "Map reads", "code_snippet": "mapper(reads)" }},
