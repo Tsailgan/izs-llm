@@ -23,7 +23,7 @@ Follow these steps strictly.
     - Set `strategy_selector` to "ADAPTED_MATCH".
     - Set `used_template_id` to the base template ID.
     - **Define Components:** List ALL tools.
-        - If a tool exists in RAG: Set `source_type`="RAG_COMPONENT" and provide the `component_id`.
+        - If a tool exists in RAG: Set `source_type`="RAG_COMPONENT" and provide the exact `component_id`.
         - If a tool is MISSING from RAG: Set `source_type`="CUSTOM_SCRIPT" and set `component_id` to null.
         - **Tool Selection:** If the user specifically asks for a tool like "shovill" or "fastp", you MUST find and use that exact tool in the RAG Context.
     - **Define Logic:** Wire the components together.
@@ -33,43 +33,75 @@ Follow these steps strictly.
     - Select tools from RAG or define custom scripts as needed.
     - **Tool Selection:** If the user specifically asks for a tool like "shovill" or "fastp", you MUST find and use that exact tool in the RAG Context.
 
+# CRITICAL RULES FOR WORKFLOW LOGIC
+You must write authentic Nextflow DSL2 logic in your code_snippets.
+
+1. EXPLICIT OUTPUT ACCESS (CRITICAL):
+Never pass a raw process name to the next step. You must look at the "OUTPUTS" list for the specific tool in the RAG context.
+In Nextflow DSL2, you must access the specific named output using `.out.<output_name>`. 
+Good: step_2AS_denovo__shovill(step_1PP_downsampling__bbnorm.out.fastq_downsampled)
+Good: step_4TY_cgMLST__chewbbaca(step_2AS_denovo__shovill.out.assembly_fasta)
+Bad: step_2AS_denovo__shovill(step_1PP_downsampling__bbnorm.out)  <-- Fails if there are multiple outputs
+Bad: step_2AS_denovo__shovill(step_1PP_downsampling__bbnorm)      <-- Fails completely
+
+2. REQUIRED PARAMETERS:
+Many tools require extra parameters besides the input data. Look at the "params" list in the RAG component. 
+If a tool needs params (like --k and --target for bbnorm), you MUST pass them in the code_snippet like this: step_1PP_downsampling__bbnorm(trimmed_reads, params.k, params.target).
+You MUST also add "k" and "target" to your global_params dictionary.
+
+3. MULTI-SAMPLE AGGREGATION:
+If a tool ID starts with "multi_" (like multi_clustering__reportree), it means it takes data from ALL samples at once. 
+You are FORBIDDEN from passing single sample channels directly to a multi tool. 
+You MUST insert a LogicStep with step_type="OPERATOR" right before it. 
+Use the .collect() operator to group the data.
+Example snippet: step_4TY_cgMLST__chewbbaca.out.alleles.collect().set {{ all_alleles }}
+Then in the next step you pass "all_alleles" to the multi tool.
+
 # EXAMPLES (Strategy Few-Shot)
 
-## Example: ADAPTED MATCH (With Custom Script)
-**User:** "Run the viral mapper but add a custom Python script to filter the VCF file at the end."
-**RAG Context:** Template `module_viral_mapper` exists. No RAG tool matches the custom Python script request.
+## Example: CUSTOM BUILD (With Params and Collection)
+**User:** "Downsample reads, then run a multisample reportree."
 **Response:**
 {{
-    "strategy_selector": "ADAPTED_MATCH",
-    "used_template_id": "module_viral_mapper",
+    "strategy_selector": "CUSTOM_BUILD",
+    "used_template_id": null,
     "components": [
-    {{ 
-        "process_alias": "mapper", 
-        "source_type": "RAG_COMPONENT", 
-        "component_id": "tool_bwa",
-        "input_type": "FastQ",
-        "output_type": "BAM"
-    }},
-    {{ 
-        "process_alias": "tool_gatk", 
-        "source_type": "RAG_COMPONENT", 
-        "component_id": "tool_gatk",
-        "input_type": "BAM",
-        "output_type": "VCF"
-    }},
-    {{ 
-        "process_alias": "my_filter", 
-        "source_type": "CUSTOM_SCRIPT", 
-        "component_id": null,
-        "input_type": "VCF",
-        "output_type": "Filtered_VCF"
-    }}
+        {{
+            "process_alias": "step_1PP_downsampling__bbnorm",
+            "source_type": "RAG_COMPONENT",
+            "component_id": "step_1PP_downsampling__bbnorm",
+            "input_type": "FastQ",
+            "output_type": "FastQ"
+        }},
+        {{
+            "process_alias": "multi_clustering__reportree",
+            "source_type": "RAG_COMPONENT",
+            "component_id": "multi_clustering__reportree",
+            "input_type": "Allele_Matrix",
+            "output_type": "Report"
+        }}
     ],
     "workflow_logic": [
-    {{ "step_type": "PROCESS_RUN", "description": "Map reads", "code_snippet": "tool_bwa(reads)" }},
-    {{ "step_type": "PROCESS_RUN", "description": "Call variants", "code_snippet": "tool_gatk(tool_bwa.out)" }},
-    {{ "step_type": "PROCESS_RUN", "description": "Run custom filter", "code_snippet": "my_filter(tool_gatk.out)" }}
-    ]
+        {{
+            "step_type": "PROCESS_RUN",
+            "description": "Downsample reads",
+            "code_snippet": "step_1PP_downsampling__bbnorm(raw_reads, params.k, params.target)"
+        }},
+        {{
+            "step_type": "OPERATOR",
+            "description": "Collect all data for report",
+            "code_snippet": "step_1PP_downsampling__bbnorm.out.fastq_downsampled.collect().set {{ collected_data }}"
+        }},
+        {{
+            "step_type": "PROCESS_RUN",
+            "description": "Run reportree",
+            "code_snippet": "multi_clustering__reportree(collected_data)"
+        }}
+    ],
+    "global_params": {{
+        "k": "31",
+        "target": "100"
+    }}
 }}
 """
 

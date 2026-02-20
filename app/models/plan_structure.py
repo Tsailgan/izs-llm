@@ -88,7 +88,10 @@ class ComponentDef(BaseModel):
 class LogicStep(BaseModel):
     step_type: Literal["PROCESS_RUN", "OPERATOR", "COMMENT"]
     description: str = Field(..., description="Brief explanation of intent.")
-    code_snippet: str = Field(..., description="Simplified logic string.")
+    code_snippet: str = Field(
+        ..., 
+        description="Authentic Nextflow logic. For processes you MUST use the exact component_id and access outputs with .out.output_name. For operators you can use .collect()."
+    )
 
 # --- The Blueprint ---
 class PipelinePlan(BaseModel):
@@ -105,24 +108,41 @@ class PipelinePlan(BaseModel):
                 "used_template_id": None,
                 "components": [
                     {
-                        "process_alias": "fastqc_check", 
+                        "process_alias": "step_1PP_downsampling__bbnorm", 
                         "source_type": "RAG_COMPONENT", 
-                        "component_id": "step_1PP_qc__fastqc",
+                        "component_id": "step_1PP_downsampling__bbnorm",
                         "input_type": "FastQ",
-                        "output_type": "HTML"
+                        "output_type": "FastQ"
                     },
                     {
-                        "process_alias": "custom_parser", 
-                        "source_type": "CUSTOM_SCRIPT", 
-                        "component_id": None,
-                        "input_type": "HTML",
-                        "output_type": "JSON"
+                        "process_alias": "multi_clustering__reportree", 
+                        "source_type": "RAG_COMPONENT", 
+                        "component_id": "multi_clustering__reportree",
+                        "input_type": "Allele_Matrix",
+                        "output_type": "Report"
                     }
                 ],
                 "workflow_logic": [
-                    {"step_type": "PROCESS_RUN", "description": "Run QC", "code_snippet": "step_1PP_qc__fastqc(input)"},
-                    {"step_type": "PROCESS_RUN", "description": "Parse stats", "code_snippet": "custom_parser(step_1PP_qc__fastqc.out)"}
-                ]
+                    {
+                        "step_type": "PROCESS_RUN", 
+                        "description": "Downsample reads", 
+                        "code_snippet": "step_1PP_downsampling__bbnorm(raw_reads, params.k, params.target)"
+                    },
+                    {
+                        "step_type": "OPERATOR", 
+                        "description": "Collect all data for report", 
+                        "code_snippet": "step_1PP_downsampling__bbnorm.out.fastq_downsampled.collect().set { collected_data }"
+                    },
+                    {
+                        "step_type": "PROCESS_RUN", 
+                        "description": "Run reportree", 
+                        "code_snippet": "multi_clustering__reportree(collected_data)"
+                    }
+                ],
+                "global_params": {
+                    "k": "31",
+                    "target": "100"
+                }
             }]
         }
     )
