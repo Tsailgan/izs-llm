@@ -276,10 +276,12 @@ class ProcessCall(BaseModel):
     
     # DSL2 Output Handling:
     # 1. 'assign_to' captures the WHOLE process object or the default channel.
-    assign_to: Optional[str] = Field(None, description="Variable name to capture the result (e.g., 'fastqc_results').")
-    
+    assign_to: Optional[str] = Field(None, description="Clean variable name to capture the result (e.g., 'trimmed_reads').")    
     # 2. 'output_attribute' handles the '.out.channelName' pattern.
-    output_attribute: Optional[str] = Field(None, description="Specific named output to extract (e.g., 'bam' implies accessing '.out.bam').")
+    output_attribute: Optional[str] = Field(
+        None, 
+        description="CRITICAL: If the Planner's code snippet uses '.out.something', you MUST extract that exact name here (e.g., 'fastq_trimmed'). Leave null only if there is no '.out'."
+    )
 
     @field_validator('args', mode='before')
     def allow_lazy_args(cls, v):
