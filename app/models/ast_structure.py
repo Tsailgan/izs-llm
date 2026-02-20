@@ -535,6 +535,23 @@ class NextflowWorkflow(BaseModel):
         self.emit_channels = valid_emits
         return self
 
+    @model_validator(mode='after')
+    def forbid_recursion(self):
+        def check_body(statements):
+            for stmt in statements:
+                if isinstance(stmt, ProcessCall):
+                    if stmt.process_name == self.name:
+                        raise ValueError(
+                            f"VALIDATION ERROR. The workflow '{self.name}' is trying to call itself. "
+                            f"Nextflow sub-workflows cannot be recursive here. "
+                            f"If you need an assembly tool please import the correct 'step_...' process."
+                        )
+                elif isinstance(stmt, ConditionalBlock):
+                    check_body(stmt.body)
+
+        check_body(self.body)
+        return self
+
 class EntrypointWorkflow(BaseModel):
     # Restrict type defined in entry point
     body: List[EntrypointStatement] = Field(
