@@ -751,6 +751,84 @@ class NextflowPipelineAST(BaseModel):
                 
         return self
 
+    @model_validator(mode='after')
+    def enforce_workflow_usage_and_scope(self):
+        valid_globals = {g.name for g in self.globals}
+        
+        valid_functions = set()
+        for imp in self.imports:
+            for func in imp.functions:
+                valid_functions.add(func.split(' as ')[-1].strip())
+        
+        implicit_vars = {"params", "it", "projectDir", "baseDir", "workDir", "Channel", "file", "tuple", "set", "println", "getEmpty"}
+        
+        called_processes = set()
+        
+        def track_calls(statements):
+            for stmt in statements:
+                if isinstance(stmt, ProcessCall):
+                    called_processes.add(stmt.process_name)
+                elif isinstance(stmt, ConditionalBlock):
+                    track_calls(stmt.body)
+
+        track_calls(self.main_workflow.body)
+        track_calls(self.entrypoint.body)
+        for sw in self.sub_workflows:
+            track_calls(sw.body)
+            
+        for sw in self.sub_workflows:
+            if sw.name not in called_processes:
+                raise ValueError(
+                    f"VALIDATION ERROR. The sub_workflow '{sw.name}' is defined but never used. "
+                    f"Either call it in the main workflow or do not define it."
+                )
+                
+        def check_block_scope(statements, current_scope, wf_name):
+            for stmt in statements:
+                if isinstance(stmt, ProcessCall):
+                    for arg in stmt.args:
+                        arg_name = None
+                        if isinstance(arg, dict) and arg.get("type") == "variable":
+                            arg_name = arg.get("name")
+                        elif hasattr(arg, "type") and arg.type == "variable":
+                            arg_name = arg.name
+                            
+                        if arg_name:
+                            base = arg_name.split('(')[0].split('.')[0].strip()
+                            if base not in current_scope and base not in valid_globals and base not in valid_functions and base not in implicit_vars:
+                                if not (base.startswith("'") or base.startswith('"') or base.isdigit()):
+                                    raise ValueError(
+                                        f"VALIDATION ERROR in '{wf_name}'. Variable '{base}' is not defined. "
+                                        f"Add it to take_channels or define it first."
+                                    )
+                    if stmt.assign_to:
+                        current_scope.add(stmt.assign_to)
+                
+                elif isinstance(stmt, ChannelChain):
+                    base_start = stmt.start_variable.split('(')[0].split('.')[0].strip()
+                    if base_start not in current_scope and base_start not in valid_globals and base_start not in valid_functions and base_start not in implicit_vars:
+                        raise ValueError(
+                            f"VALIDATION ERROR in '{wf_name}'. Channel source '{base_start}' is not defined. "
+                            f"Add it to take_channels."
+                        )
+                    if stmt.set_variable:
+                        current_scope.add(stmt.set_variable)
+                
+                elif isinstance(stmt, Assignment):
+                    current_scope.add(stmt.variable)
+                
+                elif isinstance(stmt, ConditionalBlock):
+                    check_block_scope(stmt.body, current_scope, wf_name)
+
+        for sw in self.sub_workflows:
+            wf_scope = set(sw.take_channels)
+            check_block_scope(sw.body, wf_scope, sw.name)
+            
+        main_scope = set(self.main_workflow.take_channels)
+        check_block_scope(self.main_workflow.body, main_scope, self.main_workflow.name)
+
+        return self
+
 
 # --- REBUILD MODELS FOR RECURSION ---
 ConditionalBlock.model_rebuild()
