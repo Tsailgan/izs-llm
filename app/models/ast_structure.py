@@ -60,6 +60,23 @@ class ImportItem(BaseModel):
             cleaned.append(func)
         return cleaned
         
+    @model_validator(mode='after')
+    def auto_fix_module_paths(self):
+        if "../functions/" in self.module_path:
+            return self
+
+        for func in self.functions:
+            base_name = func.split(' as ')[0].strip()
+
+            if base_name.startswith('multi_'):
+                self.module_path = f"../multi/{base_name}"
+            elif base_name.startswith('step_'):
+                self.module_path = f"../steps/{base_name}"
+            elif base_name.startswith('module_'):
+                self.module_path = f"../modules/{base_name}"
+        
+        return self
+    
 class GlobalString(BaseModel):
     type: Literal['string'] = 'string'
     name: str = Field(..., description="The variable name.")
