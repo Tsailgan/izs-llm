@@ -127,6 +127,9 @@ def filter_template_logic(code: str, allowed_components: set) -> str:
 
 def hydrator_node(state: GraphState):
     print("--- [NODE] HYDRATOR (Context Assembly) ---")
+
+    if state.get("error"):
+        return {"error": state["error"]}
     
     # Extract the plan 
     plan = state['design_plan']

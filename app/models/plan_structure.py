@@ -61,15 +61,15 @@ class ComponentDef(BaseModel):
 
     @model_validator(mode='after')
     def validate_real_rag_id(self):
-        """Checks if the LLM invented a fake component_id."""
         if self.source_type == "RAG_COMPONENT":
             if not self.component_id:
                 raise ValueError("VALIDATION ERROR: RAG_COMPONENT must have a component_id.")
             
             if VALID_COMPONENT_IDS and self.component_id not in VALID_COMPONENT_IDS:
+                valid_list = "\n- ".join(sorted(VALID_COMPONENT_IDS))
                 raise ValueError(
-                    f"VALIDATION ERROR: '{self.component_id}' is a fake or incorrect component_id. "
-                    f"It does not exist in the system. You must look at the RAG context and use the exact correct ID."
+                    f"VALIDATION ERROR: '{self.component_id}' is a fake component_id. "
+                    f"You MUST select the exact matching ID from this allowed list:\n- {valid_list}"
                 )
         return self
 
