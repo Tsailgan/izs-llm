@@ -20,7 +20,7 @@ TOOL: {comp_data.get('tool')}
 DESCRIPTION: {comp_data.get('description')}
 CONTAINER: {comp_data.get('container')}
 INPUTS: {', '.join(comp_data.get('input_types', []))}
-OUTPUTS: {', '.join(comp_data.get('output_types', []))}
+OUTPUTS: {', '.join(comp_data.get('out', []))}
 """
 
     if embed_code:
