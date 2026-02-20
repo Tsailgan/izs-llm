@@ -20,7 +20,7 @@
         }
       ],
       "input_types": ["fastq_raw_short", "fastq_raw_long"],
-      "output_types": ["qc_report_html", "qc_report_zip", "nanoplot_stats", "nanoplot_log"],
+      "out": [],
       "compatible_seq_types": ["illumina_paired", "ion", "nanopore"],
       "helper_scripts": ["scripts/step_0SQ_rawreads__fastq/SampleReadsCheck_nanopore.py"]
     },
@@ -41,12 +41,8 @@
         }
       ],
       "input_types": ["fastq_raw_short"],
-      "output_types": [
-        "fastq_trimmed", 
-        "fastp_report_json", 
-        "fastp_report_html", 
-        "fastqc_report_zip", 
-        "reads_check_csv"
+      "out": [
+        "trimmed"
       ],
       "compatible_seq_types": ["illumina_paired", "ion"],
       "helper_scripts": [
@@ -71,11 +67,8 @@
         }
       ],
       "input_types": ["fastq_raw_short"],
-      "output_types": [
-        "fastq_trimmed", 
-        "trimmomatic_log", 
-        "fastqc_report_zip", 
-        "reads_check_csv"
+      "out": [
+        "trimmed"
       ],
       "compatible_seq_types": ["illumina_paired", "ion"],
       "helper_scripts": [
@@ -96,10 +89,8 @@
         }
       ],
       "input_types": ["fastq_raw_long"],
-      "output_types": [
-        "fastq_trimmed", 
-        "nanoplot_report_html", 
-        "nanoplot_stats_txt"
+      "out": [
+        "chopper_out.trimmed"
       ],
       "params": [
         "--quality", 
@@ -123,10 +114,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "fastq_downsampled"],
-      "output_types": [
-        "fastq_host_depleted", 
-        "bowtie2_log", 
-        "samtools_log"
+      "out": [
+        "samtools_out.depleted"
       ],
       "params": ["--host_reference", "--hosts_dir"],
       "compatible_seq_types": ["illumina_paired", "ion"]
@@ -144,10 +133,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "fastq_downsampled"],
-      "output_types": [
-        "fastq_host_depleted", 
-        "minimap2_log", 
-        "samtools_log"
+      "out": [
+        "samtools_out.depleted"
       ],
       "params": ["--host_reference"],
       "compatible_seq_types": ["nanopore"]
@@ -165,11 +152,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "reference_genome_fasta"],
-      "output_types": [
-        "fastq_filtered", 
-        "bowtie2_log", 
-        "samtools_log",
-        "bam_sorted"
+      "out": [
+        "samtools.out.filtered"
       ],
       "params": ["--reference_path"],
       "compatible_seq_types": ["illumina_paired", "ion"]
@@ -185,10 +169,8 @@
         "kraken_report", 
         "kraken_output"
       ],
-      "output_types": [
-        "fastq_filtered", 
-        "krakentools_log"
-      ],
+      "out": []
+      ,
       "params": [
         "--taxaid", 
         "--include-parents", 
@@ -209,11 +191,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "reference_genome_fasta"],
-      "output_types": [
-        "fastq_filtered", 
-        "minimap2_log", 
-        "samtools_log",
-        "bam_sorted"
+      "out": [
+        "samtools_out.filtered"
       ],
       "params": ["--reference_path"],
       "compatible_seq_types": ["nanopore"]
@@ -225,10 +204,7 @@
       "description": "Normalizes read depth (coverage) to reduce computational load. Specifically configured for paired-end Illumina data using k-mer based normalization.",
       "container": "quay.io/biocontainers/bbmap:39.01--h5c4e2a8_0",
       "input_types": ["fastq_trimmed", "fastq_host_depleted"],
-      "output_types": [
-        "fastq_downsampled", 
-        "bbnorm_hist", 
-        "bbnorm_log"
+      "out": [
       ],
       "params": ["--k", "--target"],
       "compatible_seq_types": ["illumina_paired"],
@@ -241,7 +217,7 @@
       "description": "Synthetic FastQ generation from Fasta files. Uses a custom Python script to create artificial quality scores and generate paired-end reads from an assembly or consensus sequence.",
       "container": "quay.io/biocontainers/biopython:1.78",
       "input_types": ["fasta_assembly", "fasta_consensus"],
-      "output_types": ["fastq_synthetic"],
+      "out": [],
       "compatible_seq_types": ["synthetic", "assembly_derived"],
       "helper_scripts": ["scripts/step_1PP_generated__fasta2fastq/fasta2fastq.py"]
     },
@@ -262,10 +238,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "fastq_filtered", "fastq_host_depleted"],
-      "output_types": [
-        "assembly_scaffolds_filtered", 
-        "spades_log", 
-        "quast_report_csv"
+      "out": [
+        "assembled"
       ],
       "compatible_seq_types": ["illumina_paired", "ion"],
       "helper_scripts": ["scripts/step_2AS_denovo__spades/AssemblyFilter.py"]
@@ -291,23 +265,11 @@
         }
       ],
       "input_types": ["fastq_trimmed", "fastq_filtered"],
-      "output_types": [
-        "assembly_fasta", 
-        "quast_report_csv", 
-        "checkm_results_tab"
+      "out": [
+        "assembly"
       ],
       "compatible_seq_types": ["illumina_paired", "ion"],
       "params": ["--skip_checkm"]
-    },
-    {
-      "id": "step_2AS_denovo__unicycler",
-      "domain": "Assembly",
-      "tool": "Unicycler",
-      "description": "Hybrid assembly pipeline optimizer.",
-      "container": "ghcr.io/genpat-it/unicycler:0.4.8",
-      "input_types": ["fastq_trimmed"],
-      "output_types": ["assembly_scaffolds", "assembly_gfa"],
-      "compatible_seq_types": ["illumina"]
     },
     {
       "id": "step_2AS_denovo__unicycler",
@@ -326,11 +288,8 @@
         }
       ],
       "input_types": ["fastq_trimmed"],
-      "output_types": [
-        "assembly_scaffolds_filtered", 
-        "assembly_gfa", 
-        "unicycler_log", 
-        "quast_report_csv"
+      "out": [
+        "assembled"
       ],
       "compatible_seq_types": ["illumina_paired"],
       "helper_scripts": ["scripts/step_2AS_denovo__unicycler/AssemblyFilter.py"]
@@ -352,10 +311,8 @@
         }
       ],
       "input_types": ["fastq_trimmed"],
-      "output_types": [
-        "assembly_plasmids_filtered", 
-        "spades_log", 
-        "quast_report_csv"
+      "out": [
+        "assembled"
       ],
       "compatible_seq_types": ["illumina_paired", "ion"],
       "helper_scripts": ["scripts/step_2AS_denovo__plasmidspades/AssemblyFilterPlasmids.py"]
@@ -373,10 +330,8 @@
         }
       ],
       "input_types": ["fastq_short_reads", "fastq_long_reads"],
-      "output_types": [
-        "assembly_scaffolds", 
-        "assembly_gfa", 
-        "quast_report_csv"
+      "out": [
+        "scaffolds"
       ],
       "params": ["--mode"],
       "compatible_seq_types": ["hybrid"]
@@ -410,11 +365,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "reference_genome_fasta"],
-      "output_types": [
-        "consensus_fasta", 
-        "alignment_bam", 
-        "coverage_plot_png", 
-        "coverage_stats_csv"
+      "out": [
+        "consensus"
       ],
       "params": ["--reference"],
       "compatible_seq_types": ["illumina_paired", "ion"],
@@ -453,11 +405,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "reference_genome_fasta"],
-      "output_types": [
-        "consensus_fasta", 
-        "alignment_bam", 
-        "coverage_plot_png", 
-        "coverage_stats_csv"
+      "out": [
+        "consensus"
       ],
       "params": ["--reference"],
       "compatible_seq_types": ["nanopore"],
@@ -478,12 +427,7 @@
         "assembly_fasta", 
         "reference_genome"
       ],
-      "output_types": [
-        "variants_vcf", 
-        "consensus_fasta", 
-        "alignment_bam", 
-        "variants_table", 
-        "annotation_gff"
+      "out": [
       ],
       "params": ["--reference"],
       "compatible_seq_types": ["illumina_paired", "ion"]
@@ -521,11 +465,9 @@
         }
       ],
       "input_types": ["fastq_trimmed", "reference_genome_fasta"],
-      "output_types": [
-        "consensus_fasta", 
-        "alignment_bam", 
-        "coverage_plot_png", 
-        "aggregated_consensus_fasta"
+      "out": [
+        "consensus", 
+        "coverage_depth"
       ],
       "params": ["--ivar_quality_threshold"],
       "compatible_seq_types": ["illumina_paired", "ion"],
@@ -565,11 +507,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "reference_genome_fasta"],
-      "output_types": [
-        "consensus_fasta", 
-        "alignment_bam", 
-        "coverage_plot_png", 
-        "coverage_stats_csv"
+      "out": [
+        "consensus"
       ],
       "params": ["--reference"],
       "compatible_seq_types": ["nanopore"],
@@ -590,7 +529,7 @@
         "assembly_fasta", 
         "reference_genome"
       ],
-      "output_types": ["assembly_filtered"],
+      "out": [],
       "params": ["--step_2AS_filtering__seqio (Path to filterable refs)"],
       "compatible_seq_types": ["all"],
       "helper_scripts": ["scripts/step_2AS_denovo__spades/cleanDenovo.py"],
@@ -613,10 +552,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "fastq_host_depleted"],
-      "output_types": [
-        "metagenome_scaffolds_filtered", 
-        "spades_log", 
-        "quast_report_csv"
+      "out": [
+        "assembled"
       ],
       "compatible_seq_types": ["illumina_paired"],
       "helper_scripts": ["scripts/step_2MG_denovo__metaspades/AssemblyFilter.py"]
@@ -634,11 +571,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "fastq_host_depleted"],
-      "output_types": [
-        "kraken_report_tsv", 
-        "bracken_genus_tsv", 
-        "bracken_species_tsv", 
-        "taxa_import_csv"
+      "out": [
+        "genus_report"
       ],
       "params": [
         "--db_kraken", 
@@ -660,12 +594,8 @@
         }
       ],
       "input_types": ["fastq_trimmed", "fastq_host_depleted"],
-      "output_types": [
-        "kraken_report_tsv", 
-        "kraken_output_gz", 
-        "bracken_genus_tsv", 
-        "bracken_species_tsv", 
-        "taxa_import_csv"
+      "out": [
+        "genus_report"
       ],
       "params": ["--db"],
       "compatible_seq_types": ["illumina_paired", "ion"],
@@ -685,13 +615,7 @@
         }
       ],
       "input_types": ["fastq_trimmed", "fastq_host_depleted"],
-      "output_types": [
-        "centrifuge_report", 
-        "centrifuge_output", 
-        "genus_report", 
-        "species_report", 
-        "kraken_like_report",
-        "taxa_import_csv"
+      "out": [
       ],
       "params": [
         "--db_path", 
@@ -708,11 +632,7 @@
       "description": "Detects intra-species bacterial contamination in raw reads. Uses core genome MLST (cgMLST) to identify multiple strains. **Constraint:** Only runs if the genus is 'Escherichia', 'Salmonella', or 'Listeria'.",
       "container": "ghcr.io/genpat-it/confindr:0.7.4--8fe19dd246",
       "input_types": ["fastq_trimmed"],
-      "output_types": [
-        "confindr_report_csv", 
-        "rmlst_report_csv", 
-        "contamination_report_csv", 
-        "confindr_log"
+      "out": [
       ],
       "params": ["--genus_species"],
       "compatible_seq_types": ["illumina_paired", "ion"],
@@ -726,11 +646,8 @@
       "container": "python:2.7.8",
       "secondary_containers": [],
       "input_types": ["assembly_fasta", "consensus_fasta"],
-      "output_types": [
-        "kmerfinder_check", 
-        "kmerfinder_bacterial_tsv", 
-        "kmerfinder_viral_tsv", 
-        "kmerfinder_log"
+      "out": [
+        "assigned_species"
       ],
       "params": ["--db"],
       "compatible_seq_types": ["all"],
@@ -751,9 +668,8 @@
         "consensus_fasta",
         "database_name_string"
       ],
-      "output_types": [
-        "abricate_calls_txt", 
-        "abricate_log"
+      "out": [
+        "calls"
       ],
       "params": ["--db"],
       "compatible_seq_types": ["viral", "all"],
@@ -766,10 +682,7 @@
       "description": "Fast genome distance estimation using MinHash. Runs `mash screen` against a pre-packaged RefSeq database (`refseq.genomes.k21s1000.msh`) and assesses results using `assess_mash_screen.py` to determine Gram stain and species identity.",
       "container": "ghcr.io/genpat-it/mash:2.3--debdd7eb23",
       "input_types": ["fastq_trimmed", "fastq_host_depleted"],
-      "output_types": [
-        "mash_screen_tsv", 
-        "mash_screening_results_tsv", 
-        "mash_log"
+      "out": [
       ],
       "compatible_seq_types": ["illumina_paired", "ion"],
       "notes": "Uses internal container paths for RefSeq DB and Gram stain resources. Does NOT require external DB mounting."
@@ -781,11 +694,7 @@
       "description": "Predicts antibiotic resistance genes from raw reads. Runs `run_resfinder.py` with specific thresholds (L=0.6, T=0.9) against the acquired resistance database.",
       "container": "ghcr.io/genpat-it/resfinder:4.1.5--858219071c",
       "input_types": ["fastq_trimmed", "fastq_host_depleted"],
-      "output_types": [
-        "resfinder_json", 
-        "resfinder_results_txt", 
-        "resfinder_fsa", 
-        "resfinder_log"
+      "out": [
       ],
       "params": ["--genus_species"],
       "compatible_seq_types": ["illumina_paired", "ion"],
@@ -798,11 +707,7 @@
       "description": "Scans for AMR genes and point mutations using StarAMR. **Constraint:** Currently restricted to 'Campylobacter' species via the `isSpeciesSupported` check. It dynamically maps the genus to the correct PointFinder organism parameter.",
       "container": "ghcr.io/genpat-it/staramr:0.9.1--8fe6b5a239",
       "input_types": ["assembly_fasta"],
-      "output_types": [
-        "staramr_summary_tsv", 
-        "staramr_detailed_tsv", 
-        "staramr_hits_fasta", 
-        "staramr_log"
+      "out": [
       ],
       "params": ["--genus_species"],
       "compatible_seq_types": ["bacterial"],
@@ -815,11 +720,7 @@
       "description": "Mass screening of contigs against the Virulence Factor Database (VFDB). Generates CSV reports, detailed calls, and a summary of virulence factors found.",
       "container": "staphb/abricate:1.0.0",
       "input_types": ["assembly_fasta"],
-      "output_types": [
-        "abricate_csv", 
-        "abricate_summary", 
-        "abricate_calls_txt", 
-        "abricate_log"
+      "out": [
       ],
       "compatible_seq_types": ["all"],
       "notes": "Hardcoded to use '--db vfdb'. Does not support dynamic database selection in this specific module configuration."
@@ -831,9 +732,7 @@
       "description": "Post-processing logic to filter Abricate results based on Coverage and Identity thresholds. **Note:** The filtering logic is embedded directly in the Nextflow script as an inline Python block.",
       "container": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1",
       "input_types": ["abricate_calls_txt"],
-      "output_types": [
-        "abricate_filtered_calls_txt", 
-        "filtering_input_json"
+      "out": [
       ],
       "params": [
         "--coverage", 
@@ -853,12 +752,7 @@
         "kingdom_enum", 
         "reference_genbank_optional"
       ],
-      "output_types": [
-        "annotation_gff", 
-        "annotation_gbk", 
-        "annotation_tbl", 
-        "annotation_fsa", 
-        "prokka_log"
+      "out": [
       ],
       "params": ["--kingdom", "--proteins"],
       "compatible_seq_types": ["all"],
@@ -877,10 +771,7 @@
         }
       ],
       "input_types": ["assembly_fasta", "consensus_fasta"],
-      "output_types": [
-        "mlst_tsv", 
-        "mlst_cc_csv", 
-        "mlst_log"
+      "out": [
       ],
       "params": ["--excluded_schemas"],
       "compatible_seq_types": ["all"],
@@ -904,12 +795,7 @@
         }
       ],
       "input_types": ["assembly_fasta"],
-      "output_types": [
-        "allelic_profile_tsv", 
-        "chewbbaca_stats_tsv", 
-        "chewbbaca_qc_csv", 
-        "hashed_profile_tsv", 
-        "new_alleles_txt"
+      "out": [
       ],
       "params": ["--genus_species", "--schema"],
       "compatible_seq_types": ["all"],
@@ -924,10 +810,7 @@
       "container": "ghcr.io/genpat-it/mlst-w-db:2.23.0--60b8b2e3dd_231219.124455",
       "secondary_containers": [],
       "input_types": ["assembly_fasta", "consensus_fasta"],
-      "output_types": [
-        "flaA_tsv", 
-        "flaA_cc_csv", 
-        "mlst_log"
+      "out": [
       ],
       "params": ["--genus_species"],
       "compatible_seq_types": ["campylobacter"],
@@ -941,9 +824,7 @@
       "description": "SARS-CoV-2 Lineage assignment using Pangolin. Assigns Pango lineages to query SARS-CoV-2 sequences.",
       "container": "ghcr.io/genpat-it/pangolin:v4.3.1-v0.1.12-v0.3.17-v1.21",
       "input_types": ["consensus_fasta"],
-      "output_types": [
-        "lineage_report_csv", 
-        "pangolin_log"
+      "out": [
       ],
       "params": [],
       "compatible_seq_types": ["sars-cov-2"],
@@ -966,10 +847,8 @@
         }
       ],
       "input_types": ["fastq_trimmed"],
-      "output_types": [
-        "lineage_report_csv", 
-        "coverage_summary_csv", 
-        "snippy_bam"
+      "out": [
+        "lineage"
       ],
       "params": ["--threshold", "--assets_dir"],
       "compatible_seq_types": ["west_nile_virus"],
@@ -983,10 +862,8 @@
       "description": "Reconstruction and typing of plasmid sequences from assembly contigs. Uses `mob_recon` to identify and reconstruct plasmids.",
       "container": "ghcr.io/genpat-it/mobsuite:3.1.4--c2c728b1a2",
       "input_types": ["assembly_fasta"],
-      "output_types": [
-        "plasmid_fasta", 
-        "mobsuite_report_txt", 
-        "mobsuite_log"
+      "out": [
+        "plasmids"
       ],
       "params": [],
       "compatible_seq_types": ["bacteria"],
@@ -1003,10 +880,7 @@
         "directory_of_snippy_results",
         "reference_genome_genbank"
       ],
-      "output_types": [
-        "core_snp_alignment_fasta", 
-        "clean_full_alignment_fasta", 
-        "snippy_core_log"
+      "out": [
       ],
       "params": [],
       "compatible_seq_types": ["illumina_paired", "ion"],
@@ -1019,11 +893,7 @@
       "description": "Pangenome analysis pipeline. Constructs a pangenome graph from multiple GFF files (typically from Prokka), cleans invalid genes, and generates gene presence/absence matrices and a core genome alignment using MAFFT.",
       "container": "quay.io/biocontainers/panaroo:1.3.3--pyhdfd78af_0",
       "input_types": ["list_of_gff_files"],
-      "output_types": [
-        "pangenome_graph", 
-        "gene_presence_absence_matrix", 
-        "core_genome_alignment", 
-        "panaroo_log"
+      "out": [
       ],
       "dependencies": ["step_4AN_genes__prokka"],
       "params": [
@@ -1049,12 +919,7 @@
         "metadata_tsv", 
         "geodata_tsv"
       ],
-      "output_types": [
-        "auspice_json", 
-        "alignment_fasta", 
-        "tree_nwk", 
-        "traits_json", 
-        "ancestral_mutations_json"
+      "out": [
       ],
       "params": [
         "--traits_columns", 
@@ -1078,11 +943,7 @@
         "metadata_tsv", 
         "geodata_tsv"
       ],
-      "output_types": [
-        "reportree_cluster_tsv", 
-        "reportree_partitions_tsv", 
-        "reportree_tree_nwk", 
-        "grape_tree_json"
+      "out": [
       ],
       "params": [
         "--input_type", 

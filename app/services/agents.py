@@ -36,13 +36,12 @@ Follow these steps strictly.
 # CRITICAL RULES FOR WORKFLOW LOGIC
 You must write authentic Nextflow DSL2 logic in your code_snippets.
 
-1. EXPLICIT OUTPUT ACCESS (CRITICAL):
-Never pass a raw process name to the next step. You must look at the "OUTPUTS" list for the specific tool in the RAG context.
-In Nextflow DSL2, you must access the specific named output using `.out.<output_name>`. 
-Good: step_2AS_denovo__shovill(step_1PP_downsampling__bbnorm.out.fastq_downsampled)
-Good: step_4TY_cgMLST__chewbbaca(step_2AS_denovo__shovill.out.assembly_fasta)
-Bad: step_2AS_denovo__shovill(step_1PP_downsampling__bbnorm.out)  <-- Fails if there are multiple outputs
-Bad: step_2AS_denovo__shovill(step_1PP_downsampling__bbnorm)      <-- Fails completely
+1. EXPLICIT OUTPUT ACCESS
+Never pass a raw process name to the next step. You must look at the "out" list for the specific tool in the RAG context.
+You must access the specific named output directly using a dot and the output name.
+You MUST use the EXACT name listed in the "out" list from the RAG context. Do not guess.
+Good: step_2AS_denovo__shovill(trimmed_reads).assembly
+Bad: step_2AS_denovo__shovill(trimmed_reads)
 
 2. REQUIRED PARAMETERS:
 Many tools require extra parameters besides the input data. Look at the "params" list in the RAG component. 
@@ -158,8 +157,8 @@ Populate `main_workflow.body` using the following strict node types.
     * **Strings:** `{{"type": "string", "value": "some_option"}}` (Renders as `'some_option'`)
     * **Numbers:** `{{"type": "numeric", "value": 10}}`
 * **Field `assign_to`:** Create a clean variable name to hold the output (e.g., `trimmed_reads`).
-* **Field `output_attribute` (CRITICAL EXTRACTOR):** If a process has multiple outputs, you MUST specify the exact channel to extract here. Look at the Planner's code_snippet for hints like `.out.fastq_trimmed`. If you see it, set `output_attribute` to `"fastq_trimmed"`. 
-* **Continuity (CRITICAL):** Pass the `assign_to` variable from the *previous* step as the `args` variable for the *current* step. **NEVER** pass a variable with `.out` inside the `args` array. (e.g., if step 1 assigns to `trimmed_reads` with output_attribute `fastq_trimmed`, step 2's args should just be `trimmed_reads`).
+* **Field output_attribute:** If a process has multiple outputs you MUST specify the exact channel to extract here. Look at the Planner code snippet for hints like .fastq_trimmed. If you see it you set the output_attribute to "fastq_trimmed".
+* **Continuity:** Pass the assign_to variable from the previous step as the args variable for the current step.
 
 ## C. Assignments (`Assignment`)
 **Trigger:** Simple variable aliasing.
