@@ -1,5 +1,6 @@
 import json
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage
 from app.models.plan_structure import PipelinePlan
 from app.models.ast_structure import NextflowPipelineAST
 from app.services.llm import get_llm
@@ -196,14 +197,24 @@ def planner_node(state: GraphState):
     ])
 
     planner = llm.with_structured_output(PipelinePlan)
-    chain = prompt | planner
 
-    try:
-        plan = chain.invoke({"query": state['user_query'], "context": metadata_context})
-        print("Agent 1 Output:", plan.model_dump())
-        return {"design_plan": plan.model_dump()}
-    except Exception as e:
-        return {"error": f"Planner failed: {str(e)}"}
+    messages = prompt.invoke({"query": state['user_query'], "context": metadata_context}).to_messages()
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            plan = planner.invoke(messages)
+            print(f"Agent 1 Output on attempt {attempt + 1}:", plan.model_dump())
+            return {"design_plan": plan.model_dump(), "error": None}
+            
+        except Exception as e:
+            print(f"Planner Validation Error (Attempt {attempt + 1}): {str(e)}")
+            
+            if attempt == max_retries - 1:
+                return {"error": f"Planner failed after {max_retries} attempts: {str(e)}"}
+            
+            error_msg = f"Your previous response failed validation. Error:\n{str(e)}\nPlease fix the mistake and generate the JSON again."
+            messages.append(HumanMessage(content=error_msg))
 
 def architect_node(state: GraphState):
     print("--- [NODE] ARCHITECT ---")

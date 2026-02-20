@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from typing import Literal, List, Optional, Dict
 
 # --- Component Definition ---
@@ -10,6 +10,40 @@ class ComponentDef(BaseModel):
 
     input_type: Optional[str] = Field(None, description="The primary input data format (e.g., 'FastQ', 'BAM', 'VCF').")
     output_type: Optional[str] = Field(None, description="The primary output data format (e.g., 'BAM', 'HTML', 'TXT').")
+
+    @model_validator(mode='after')
+    def enforce_rag_for_standard_tools(self):
+        if self.source_type == "CUSTOM_SCRIPT":
+            description_text = str(self.process_alias) + " " + str(self.source_description)
+            description_text = description_text.lower()
+            
+            standard_tools = [
+                # QC & Preprocessing
+                "fastp", "fastqc", "nanoplot", "trimmomatic", "chopper", "bbnorm", "downsampl", "trimming",
+                # Mapping & Filtering
+                "bowtie", "minimap", "samtools", "krakentools",
+                # Assembly
+                "shovill", "spades", "unicycler", 
+                # Variant Calling & Consensus
+                "snippy", "ivar", "medaka",
+                # Taxonomy & Classification
+                "kraken", "bracken", "centrifuge", "confindr", "kmerfinder", "mash",
+                # AMR, Genes & Annotation
+                "abricate", "resfinder", "staramr", "prokka",
+                # Typing & Lineage
+                "mlst", "cgmlst", "chewbbaca", "flaa", "pangolin", "mobsuite", "westnile",
+                # Multi-sample
+                "panaroo", "augur", "reportree"
+            ]
+            
+            for tool in standard_tools:
+                if tool in description_text:
+                    raise ValueError(
+                        f"VALIDATION ERROR. You marked '{self.process_alias}' as a CUSTOM_SCRIPT. "
+                        f"However '{tool}' is a standard tool. "
+                        f"You must find its exact component_id in the provided RAG context and set source_type to RAG_COMPONENT."
+                    )
+        return self
 
 # --- Logic Definition ---
 class LogicStep(BaseModel):
@@ -32,9 +66,9 @@ class PipelinePlan(BaseModel):
                 "used_template_id": None,
                 "components": [
                     {
-                        "process_alias": "fastqc", 
+                        "process_alias": "fastqc_check", 
                         "source_type": "RAG_COMPONENT", 
-                        "component_id": "tool_fastqc_v1",
+                        "component_id": "step_1PP_qc__fastqc",
                         "input_type": "FastQ",
                         "output_type": "HTML"
                     },
@@ -47,8 +81,8 @@ class PipelinePlan(BaseModel):
                     }
                 ],
                 "workflow_logic": [
-                    {"step_type": "PROCESS_RUN", "description": "Run QC", "code_snippet": "fastqc(input)"},
-                    {"step_type": "PROCESS_RUN", "description": "Parse stats", "code_snippet": "custom_parser(fastqc.out)"}
+                    {"step_type": "PROCESS_RUN", "description": "Run QC", "code_snippet": "step_1PP_qc__fastqc(input)"},
+                    {"step_type": "PROCESS_RUN", "description": "Parse stats", "code_snippet": "custom_parser(step_1PP_qc__fastqc.out)"}
                 ]
             }]
         }
