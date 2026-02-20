@@ -723,25 +723,29 @@ class NextflowPipelineAST(BaseModel):
                 
         scope = set(valid_globals)
         
+        implicit_nf_vars = {"params", "projectDir", "workDir", "baseDir", "launchDir"}
+        
         for stmt in self.entrypoint.body:
             if isinstance(stmt, ProcessCall):
                 for arg in stmt.args:
+                    arg_name = None
                     if isinstance(arg, dict) and arg.get("type") == "variable":
-                        base_var = arg.get("name").split('.')[0]
-                        if base_var not in scope and base_var not in valid_functions:
-                            raise ValueError(
-                                f"VALIDATION ERROR. Variable '{base_var}' is not defined in the entrypoint. "
-                                f"You cannot pass undefined variables. Did you mean to call an imported function like 'getInput()'?"
-                            )
+                        arg_name = arg.get("name")
                     elif hasattr(arg, "type") and arg.type == "variable":
-                        base_var = arg.name.split('.')[0]
-                        if base_var not in scope and base_var not in valid_functions:
+                        arg_name = arg.name
+                        
+                    if arg_name:
+                        base_var = arg_name.split('(')[0].split('.')[0].strip()
+                        
+                        if base_var not in scope and base_var not in valid_functions and base_var not in implicit_nf_vars:
                             raise ValueError(
-                                f"VALIDATION ERROR. Variable '{base_var}' is not defined in the entrypoint. "
-                                f"You cannot pass undefined variables. Did you mean to call an imported function like 'getInput()'?"
+                                f"VALIDATION ERROR. Variable '{base_var}' (from '{arg_name}') is not defined in the entrypoint. "
+                                f"You cannot pass undefined variables."
                             )
+                
                 if stmt.assign_to:
                     scope.add(stmt.assign_to)
+                    
             elif isinstance(stmt, Assignment):
                 scope.add(stmt.variable)
                 
