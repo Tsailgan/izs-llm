@@ -570,6 +570,45 @@ class NextflowWorkflow(BaseModel):
 
         check_body(self.body)
         return self
+    
+    @model_validator(mode='after')
+    def auto_fix_double_channel_access(self):
+        extracted_channels = set()
+        
+        for stmt in self.body:
+            if isinstance(stmt, ProcessCall):
+                for arg in stmt.args:
+                    arg_name = None
+                    if isinstance(arg, dict) and arg.get("type") == "variable":
+                        arg_name = arg.get("name")
+                    elif hasattr(arg, "type") and arg.type == "variable":
+                        arg_name = arg.name
+                        
+                    if arg_name and '.' in arg_name:
+                        base_var = arg_name.split('.')[0]
+                        if base_var in extracted_channels:
+                            if isinstance(arg, dict):
+                                arg["name"] = base_var
+                            else:
+                                arg.name = base_var
+                                
+            elif isinstance(stmt, ChannelChain):
+                if stmt.start_variable and '.' in stmt.start_variable:
+                    base_var = stmt.start_variable.split('.')[0]
+                    if base_var in extracted_channels:
+                        stmt.start_variable = base_var
+
+            if isinstance(stmt, ProcessCall):
+                if stmt.assign_to and stmt.output_attribute:
+                    extracted_channels.add(stmt.assign_to)
+                    
+        for emit in self.emit_channels:
+            if emit.internal_variable and '.' in emit.internal_variable:
+                base_var = emit.internal_variable.split('.')[0]
+                if base_var in extracted_channels:
+                    emit.internal_variable = base_var
+                    
+        return self
 
 class EntrypointWorkflow(BaseModel):
     # Restrict type defined in entry point
