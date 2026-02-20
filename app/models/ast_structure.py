@@ -675,6 +675,79 @@ class NextflowPipelineAST(BaseModel):
         
         return self
     
+    @model_validator(mode='after')
+    def enforce_defined_processes(self):
+        allowed = set()
+        
+        for imp in self.imports:
+            for func in imp.functions:
+                alias = func.split(' as ')[-1].strip()
+                allowed.add(alias)
+                
+        for p in self.processes:
+            allowed.add(p.name)
+            
+        for sw in self.sub_workflows:
+            allowed.add(sw.name)
+            
+        allowed.add(self.main_workflow.name)
+        allowed.update({"Channel", "file", "tuple", "set", "println"})
+
+        def check_body(statements):
+            for stmt in statements:
+                if isinstance(stmt, ProcessCall):
+                    if stmt.process_name not in allowed:
+                        raise ValueError(
+                            f"VALIDATION ERROR. The process or function '{stmt.process_name}' is undefined. "
+                            f"You must add it to the imports list or define it as a sub_workflow. "
+                            f"If it is a standard tool please use the correct 'step_...' name."
+                        )
+                elif isinstance(stmt, ConditionalBlock):
+                    check_body(stmt.body)
+
+        check_body(self.main_workflow.body)
+        check_body(self.entrypoint.body)
+        for sw in self.sub_workflows:
+            check_body(sw.body)
+
+        return self
+
+    @model_validator(mode='after')
+    def enforce_entrypoint_variables(self):
+        valid_globals = {g.name for g in self.globals}
+        
+        valid_functions = set()
+        for imp in self.imports:
+            for func in imp.functions:
+                valid_functions.add(func.split(' as ')[-1].strip())
+                
+        scope = set(valid_globals)
+        
+        for stmt in self.entrypoint.body:
+            if isinstance(stmt, ProcessCall):
+                for arg in stmt.args:
+                    if isinstance(arg, dict) and arg.get("type") == "variable":
+                        base_var = arg.get("name").split('.')[0]
+                        if base_var not in scope and base_var not in valid_functions:
+                            raise ValueError(
+                                f"VALIDATION ERROR. Variable '{base_var}' is not defined in the entrypoint. "
+                                f"You cannot pass undefined variables. Did you mean to call an imported function like 'getInput()'?"
+                            )
+                    elif hasattr(arg, "type") and arg.type == "variable":
+                        base_var = arg.name.split('.')[0]
+                        if base_var not in scope and base_var not in valid_functions:
+                            raise ValueError(
+                                f"VALIDATION ERROR. Variable '{base_var}' is not defined in the entrypoint. "
+                                f"You cannot pass undefined variables. Did you mean to call an imported function like 'getInput()'?"
+                            )
+                if stmt.assign_to:
+                    scope.add(stmt.assign_to)
+            elif isinstance(stmt, Assignment):
+                scope.add(stmt.variable)
+                
+        return self
+
+
 # --- REBUILD MODELS FOR RECURSION ---
 ConditionalBlock.model_rebuild()
 NextflowProcess.model_rebuild()
