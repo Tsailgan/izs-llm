@@ -152,12 +152,14 @@ Populate `main_workflow.body` using the following strict node types.
 
 ## B. Process Calls (`ProcessCall`)
 **Trigger:** Execution of a tool or sub-workflow.
-* **CRITICAL NAME RULE:** The `process_name` MUST be the exact tool name from the design plan (like `step_1PP_trimming__fastp` or `step_2AS_denovo__shovill`). Do not invent generic words like `trimmer` or `cgmlst`.
+* **CRITICAL NAME RULE:** The `process_name` MUST be the exact tool name from the design plan (like `step_1PP_trimming__fastp`). Do not invent generic words.
 * **Field `args` (CRITICAL):** Must be a list of **Typed Objects**:
     * **Variables:** `{{"type": "variable", "name": "ch_input"}}` (Renders as `ch_input`)
     * **Strings:** `{{"type": "string", "value": "some_option"}}` (Renders as `'some_option'`)
     * **Numbers:** `{{"type": "numeric", "value": 10}}`
-* **Continuity:** You MUST pass the `assign_to` variable from the *previous* step as the `args` variable for the *current* step.
+* **Field `assign_to`:** Create a clean variable name to hold the output (e.g., `trimmed_reads`).
+* **Field `output_attribute` (CRITICAL EXTRACTOR):** If a process has multiple outputs, you MUST specify the exact channel to extract here. Look at the Planner's code_snippet for hints like `.out.fastq_trimmed`. If you see it, set `output_attribute` to `"fastq_trimmed"`. 
+* **Continuity (CRITICAL):** Pass the `assign_to` variable from the *previous* step as the `args` variable for the *current* step. **NEVER** pass a variable with `.out` inside the `args` array. (e.g., if step 1 assigns to `trimmed_reads` with output_attribute `fastq_trimmed`, step 2's args should just be `trimmed_reads`).
 
 ## C. Assignments (`Assignment`)
 **Trigger:** Simple variable aliasing.
