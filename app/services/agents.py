@@ -24,11 +24,13 @@ Follow these steps strictly.
     - **Define Components:** List ALL tools.
         - If a tool exists in RAG: Set `source_type`="RAG_COMPONENT" and provide the `component_id`.
         - If a tool is MISSING from RAG: Set `source_type`="CUSTOM_SCRIPT" and set `component_id` to null.
+        - **Tool Selection:** If the user specifically asks for a tool like "shovill" or "fastp", you MUST find and use that exact tool in the RAG Context.
     - **Define Logic:** Wire the components together.
 
 3. **OTHERWISE** (No template matches):
     - Set `strategy_selector` to "CUSTOM_BUILD".
     - Select tools from RAG or define custom scripts as needed.
+    - **Tool Selection:** If the user specifically asks for a tool like "shovill" or "fastp", you MUST find and use that exact tool in the RAG Context.
 
 # EXAMPLES (Strategy Few-Shot)
 
@@ -48,7 +50,7 @@ Follow these steps strictly.
         "output_type": "BAM"
     }},
     {{ 
-        "process_alias": "caller", 
+        "process_alias": "tool_gatk", 
         "source_type": "RAG_COMPONENT", 
         "component_id": "tool_gatk",
         "input_type": "BAM",
@@ -63,9 +65,9 @@ Follow these steps strictly.
     }}
     ],
     "workflow_logic": [
-    {{ "step_type": "PROCESS_RUN", "description": "Map reads", "code_snippet": "mapper(reads)" }},
-    {{ "step_type": "PROCESS_RUN", "description": "Call variants", "code_snippet": "caller(mapper.out)" }},
-    {{ "step_type": "PROCESS_RUN", "description": "Run custom filter", "code_snippet": "my_filter(caller.out)" }}
+    {{ "step_type": "PROCESS_RUN", "description": "Map reads", "code_snippet": "tool_bwa(reads)" }},
+    {{ "step_type": "PROCESS_RUN", "description": "Call variants", "code_snippet": "tool_gatk(tool_bwa.out)" }},
+    {{ "step_type": "PROCESS_RUN", "description": "Run custom filter", "code_snippet": "my_filter(tool_gatk.out)" }}
     ]
 }}
 """
@@ -117,6 +119,7 @@ Populate `main_workflow.body` using the following strict node types.
 
 ## B. Process Calls (`ProcessCall`)
 **Trigger:** Execution of a tool or sub-workflow.
+* **CRITICAL NAME RULE:** The `process_name` MUST be the exact tool name from the design plan (like `step_1PP_trimming__fastp` or `step_2AS_denovo__shovill`). Do not invent generic words like `trimmer` or `cgmlst`.
 * **Field `args` (CRITICAL):** Must be a list of **Typed Objects**:
     * **Variables:** `{{"type": "variable", "name": "ch_input"}}` (Renders as `ch_input`)
     * **Strings:** `{{"type": "string", "value": "some_option"}}` (Renders as `'some_option'`)
@@ -151,7 +154,8 @@ This is the **Logic Core**.
 ## B. Entrypoint (`entrypoint`)
 This is the **Trigger**.
 * **Constraint:** Strict Modularity. You are **FORBIDDEN** from defining complex logic (`.cross`, `.multiMap`) here.
-* **Action:** Call helper functions (e.g., `getSingleInput()`) and pass results to the `main_workflow` module.
+* **Inputs:** Do not use undefined variables like `raw_reads` or `trimmed`. Always use standard helper functions like `getInput()` to pass data to the module.
+* **Action:** Call helper functions and pass results to the `main_workflow` module.
 * **Validation:** The number of arguments passed to the module **MUST** match `main_workflow.take_channels`.
 
 # 4. EXECUTION MODES
