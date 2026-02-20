@@ -200,7 +200,7 @@ def planner_node(state: GraphState):
 
     messages = prompt.invoke({"query": state['user_query'], "context": metadata_context}).to_messages()
 
-    max_retries = 3
+    max_retries = 5
     for attempt in range(max_retries):
         try:
             plan = planner.invoke(messages)

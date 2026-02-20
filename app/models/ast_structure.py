@@ -731,6 +731,7 @@ class NextflowPipelineAST(BaseModel):
 
     @model_validator(mode='after')
     def enforce_entrypoint_variables(self):
+
         valid_globals = {g.name for g in self.globals}
         
         valid_functions = set()
@@ -739,7 +740,6 @@ class NextflowPipelineAST(BaseModel):
                 valid_functions.add(func.split(' as ')[-1].strip())
                 
         scope = set(valid_globals)
-        
         implicit_nf_vars = {"params", "projectDir", "workDir", "baseDir", "launchDir"}
         
         for stmt in self.entrypoint.body:
@@ -755,10 +755,17 @@ class NextflowPipelineAST(BaseModel):
                         base_var = arg_name.split('(')[0].split('.')[0].strip()
                         
                         if base_var not in scope and base_var not in valid_functions and base_var not in implicit_nf_vars:
-                            raise ValueError(
-                                f"VALIDATION ERROR. Variable '{base_var}' (from '{arg_name}') is not defined in the entrypoint. "
-                                f"You cannot pass undefined variables."
-                            )
+                            if base_var.startswith("get"):
+                                raise ValueError(
+                                    f"VALIDATION ERROR. You used '{base_var}()' in the entrypoint, but forgot to import it. "
+                                    f"You MUST add '{base_var}' to the 'imports' list with module_path '../functions/parameters.nf'."
+                                )
+                            else:
+                                raise ValueError(
+                                    f"VALIDATION ERROR. Variable '{base_var}' is not defined. "
+                                    f"You cannot pass undefined variables like '{base_var}'. "
+                                    f"Use an imported function like 'getInput()'."
+                                )
                 
                 if stmt.assign_to:
                     scope.add(stmt.assign_to)
