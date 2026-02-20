@@ -280,7 +280,7 @@ class ProcessCall(BaseModel):
     # 2. 'output_attribute' handles the '.out.channelName' pattern.
     output_attribute: Optional[str] = Field(
         None, 
-        description="CRITICAL: If the Planner's code snippet uses '.out.something', you MUST extract that exact name here (e.g., 'fastq_trimmed'). Leave null only if there is no '.out'."
+        description="CRITICAL: If the Planner's code snippet uses '.out.something', you MUST extract that exact name here (e.g., 'trimmed'). Leave null only if there is no '.out'."
     )
 
     @field_validator('args', mode='before')

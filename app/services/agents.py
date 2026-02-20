@@ -157,7 +157,7 @@ Populate `main_workflow.body` using the following strict node types.
     * **Strings:** `{{"type": "string", "value": "some_option"}}` (Renders as `'some_option'`)
     * **Numbers:** `{{"type": "numeric", "value": 10}}`
 * **Field `assign_to`:** Create a clean variable name to hold the output (e.g., `trimmed_reads`).
-* **Field output_attribute:** If a process has multiple outputs you MUST specify the exact channel to extract here. Look at the Planner code snippet for hints like .fastq_trimmed. If you see it you set the output_attribute to "fastq_trimmed".
+* **Field output_attribute:** If a process has multiple outputs you MUST specify the exact channel to extract here. Look at the Planner code snippet for hints like .out. If you see it you set the output_attribute to "out".
 * **Continuity:** Pass the assign_to variable from the previous step as the args variable for the current step.
 
 ## C. Assignments (`Assignment`)
