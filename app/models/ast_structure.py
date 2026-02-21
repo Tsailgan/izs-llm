@@ -24,7 +24,7 @@ def repair_lazy_calls(statements: List[Any]) -> List[Any]:
                 match = re.match(r'^([a-zA-Z0-9_]+)\s*\((.*)\)(\.[a-zA-Z0-9_]+)?$', val)
                 
                 # Check known tool prefixes
-                if match and any(x in val for x in ["step_", "prepare_", "module_", "get"]):
+                if match and any(x in val for x in ["step_", "prepare_", "module_", "get", "multi_"]):
                     proc_name = match.group(1)
                     raw_args = match.group(2)
                     suffix = match.group(3)
@@ -775,7 +775,7 @@ class NextflowPipelineAST(BaseModel):
                         raise ValueError(
                             f"VALIDATION ERROR. The process or function '{stmt.process_name}' is undefined. "
                             f"You must add it to the imports list or define it as a sub_workflow. "
-                            f"If it is a standard tool please use the correct 'step_...' name."
+                            f"If it is a standard tool please use the correct 'step_...' or 'multi_...' or 'module_...' name."
                         )
                 elif isinstance(stmt, ConditionalBlock):
                     check_body(stmt.body)

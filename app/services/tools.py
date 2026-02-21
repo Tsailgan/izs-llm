@@ -50,7 +50,9 @@ def retrieve_rag_context(user_query, embed_code=False):
     if not data_loader.vector_store:
         return "Vector Store not loaded."
     
-    docs = data_loader.vector_store.similarity_search(user_query, k=5)
+    docs = data_loader.vector_store.similarity_search(user_query, k=10)
+
+    print(docs)
 
     TMPL_DB = data_loader.tmpl_db
 
@@ -110,7 +112,7 @@ def filter_template_logic(code: str, allowed_components: set) -> str:
     lines = code.split('\n')
     filtered_lines = []
     
-    pattern = re.compile(r'\b((?:step_|module_)[a-zA-Z0-9_]+)\s*\(')
+    pattern = re.compile(r'\b((?:step_|module_|multi_)[a-zA-Z0-9_]+)\s*\(')
     
     for line in lines:
         match = pattern.search(line)
