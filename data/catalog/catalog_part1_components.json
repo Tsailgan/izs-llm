@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "0.2"
+    "version": "0.5"
   },
   "components": [
     {
@@ -953,6 +953,282 @@
       ],
       "compatible_seq_types": ["multi_sample"],
       "notes": "Acts as a router. Requires `multi_clustering__reportree__input` parameter to be one of ['alleles', 'alignment', 'vcf'] to select the correct logic path."
+    },
+    {
+      "id": "multi_clustering__augur",
+      "domain": "Phylogeny",
+      "tool": "Augur (Workflow)",
+      "description": "Complete Nextstrain/Augur phylogenetic pipeline. Performs: 1) Metadata standardization, 2) Multi-sequence alignment, 3) Tree building & refinement (TimeTree/Coalescent), 4) Ancestral state reconstruction (nucleotide & amino acid), 5) Trait inference (Geography), and 6) Export to Auspice JSON format.",
+      "container": "quay.io/biocontainers/augur:23.1.1--pyhdfd78af_1",
+      "input_types": [
+        "list_of_fasta", 
+        "reference_genome_genbank", 
+        "metadata_tsv", 
+        "geodata_tsv"
+      ],
+      "out": [],
+      "params": [
+        "--traits_columns", 
+        "--tree_method", 
+        "--refine_coalescent", 
+        "--ancestral_inference"
+      ],
+      "compatible_seq_types": ["viral", "multi_sample"],
+      "notes": "Automatically standardizes metadata columns (renaming to 'name' and 'date') before processing. Requires a GenBank reference for feature translation."
+    },
+    {
+      "id": "multi_clustering__reportree",
+      "domain": "Phylogeny",
+      "tool": "ReporTree (Dynamic Wrapper)",
+      "description": "Multi-sample clustering and surveillance workflow. Dynamically routes execution to one of three sub-pipelines based on input type: 1) **Alleles** (cgMLST profiles), 2) **Alignment** (FASTA MSA), or 3) **VCF** (SNP calls). Generates Minimum Spanning Trees (MST) and metadata-enriched visualizations.",
+      "container": "ghcr.io/genpat-it/reportree:1.0.0--1",
+      "input_types": [
+        "allelic_profile_tsv", 
+        "alignment_fasta", 
+        "variants_vcf", 
+        "metadata_tsv", 
+        "geodata_tsv"
+      ],
+      "out": [],
+      "params": [
+        "--input_type", 
+        "--metadata", 
+        "--geodata", 
+        "--nomenclature"
+      ],
+      "compatible_seq_types": ["multi_sample"],
+      "notes": "Acts as a router. Requires `multi_clustering__reportree__input` parameter to be one of ['alleles', 'alignment', 'vcf'] to select the correct logic path."
+    },
+    {
+      "id": "multi_clustering__reportree_vcf",
+      "domain": "Phylogeny",
+      "tool": "ReporTree (VCF Clustering)",
+      "description": "ReporTree pipeline variant designed specifically for VCF inputs. Constructs a GrapeTree Minimum Spanning Tree from genetic distance (Hamming) matrices. Features optional Hierarchical Clustering (HC) and Augur export for Auspice visualization.",
+      "container": "ghcr.io/genpat-it/reportree:2.4.1--088b6651b8",
+      "input_types": [
+        "variants_vcf",
+        "metadata_tsv",
+        "geodata_tsv",
+        "nomenclature_tsv"
+      ],
+      "out": [],
+      "params": [
+        "--thr",
+        "--sample_of_interest",
+        "--zoom_cluster_of_interest",
+        "--subtree-of-interest",
+        "--loci_called",
+        "--site_inclusion",
+        "--HC_threshold",
+        "--report_threshold"
+      ],
+      "compatible_seq_types": ["multi_sample"],
+      "notes": "Extracts sample names dynamically from file names. Capable of pinpointing the closest samples using a specific sample of interest threshold."
+    },
+    {
+      "id": "multi_clustering__cfsan",
+      "domain": "Phylogeny",
+      "tool": "CFSAN SNP Pipeline",
+      "description": "FDA's CFSAN SNP Pipeline for identifying SNPs in sequence data. Maps reads to a reference, constructs a multi-FASTA SNP matrix, infers phylogenetic trees using IQ-TREE, and integrates with Augur to export Auspice JSONs.",
+      "container": "staphb/cfsan-snp-pipeline",
+      "input_types": [
+        "sequence_reads",
+        "reference_genome_fasta",
+        "metadata_tsv",
+        "geodata_tsv"
+      ],
+      "out": [],
+      "params": [
+        "--version"
+      ],
+      "compatible_seq_types": ["multi_sample"],
+      "notes": "Supports container versioning ('2.2.1' or '2.0.2') directly through the params payload. Automatically prunes output alignment artifacts."
+    },
+    {
+      "id": "multi_clustering__reportree_alignment",
+      "domain": "Phylogeny",
+      "tool": "ReporTree (Alignment Clustering)",
+      "description": "ReporTree pipeline variant for FASTA sequences. Automatically performs Multiple Sequence Alignment (MSA) using MAFFT before calculating distance matrices and generating GrapeTree/Hierarchical clustering outputs. Includes Augur integration.",
+      "container": "ghcr.io/genpat-it/reportree:2.4.1--088b6651b8",
+      "input_types": [
+        "list_of_fasta",
+        "metadata_tsv",
+        "geodata_tsv",
+        "nomenclature_tsv"
+      ],
+      "out": [],
+      "params": [
+        "--thr",
+        "--loci_called",
+        "--site_inclusion",
+        "--HC_threshold",
+        "--sample_of_interest",
+        "--report_threshold"
+      ],
+      "compatible_seq_types": ["multi_sample"],
+      "notes": "Utilizes MAFFT (`--auto`) prior to standard ReporTree execution."
+    },
+    {
+      "id": "multi_clustering__reportree_alleles",
+      "domain": "Phylogeny",
+      "tool": "ReporTree (Alleles Clustering)",
+      "description": "ReporTree pipeline variant for allelic profiles (cgMLST). Merges multi-sample profiles using chewBBACA, calculates GrapeTree/Hierarchical clusters, and generates Auspice-compatible outputs via Augur.",
+      "container": "ghcr.io/genpat-it/reportree:2.4.1--088b6651b8",
+      "input_types": [
+        "allelic_profile_tsv",
+        "metadata_tsv",
+        "geodata_tsv",
+        "nomenclature_tsv"
+      ],
+      "out": [],
+      "params": [
+        "--thr",
+        "--loci_called",
+        "--site_inclusion",
+        "--HC_threshold",
+        "--sample_of_interest",
+        "--report_threshold"
+      ],
+      "compatible_seq_types": ["multi_sample"],
+      "notes": "Leverages `chewie ExtractCgMLST` for profile consolidation before distance matrix computation."
+    },
+    {
+      "id": "multi_clustering__vcf2mst",
+      "domain": "Phylogeny",
+      "tool": "vcf2mst",
+      "description": "Creates a Minimum Spanning Tree (MST) from a collection of VCF files. Generates a Newick tree structure, a Hamming distance matrix, and a cgMLST-style distances CSV.",
+      "container": "ghcr.io/genpat-it/vcf2mst:0.0.1--d587d682e9",
+      "input_types": [
+        "variants_vcf"
+      ],
+      "out": [],
+      "params": [],
+      "compatible_seq_types": ["multi_sample"],
+      "notes": "Employs `cgmlst-dists` to compute pairwise distance metrics natively from the generated matrix."
+    },
+    {
+      "id": "multi_pangenome__panaroo",
+      "domain": "Pangenome",
+      "tool": "Panaroo",
+      "description": "Constructs a pangenome graph from annotated GFF files. Filters out invalid genes, performs core genome alignment using MAFFT, and resolves paralogs. Suitable for large multi-sample bacterial cohorts.",
+      "container": "quay.io/biocontainers/panaroo:1.3.3--pyhdfd78af_0",
+      "input_types": [
+        "gff_annotations"
+      ],
+      "out": [],
+      "params": [
+        "--clean_mode",
+        "--threshold",
+        "--family_threshold",
+        "--len_dif_percent",
+        "--threads",
+        "--extra"
+      ],
+      "compatible_seq_types": ["bacterial", "multi_sample"],
+      "notes": "Strictly utilizes MAFFT for the core alignment phase. Tolerates custom thresholds for clustering stringency."
+    },
+    {
+      "id": "multi_clustering__grapetree",
+      "domain": "Phylogeny",
+      "tool": "GrapeTree",
+      "description": "Standalone GrapeTree pipeline for cgMLST allelic profiles. Merges profiles using chewBBACA ExtractCgMLST, calculates RapidNJ Newick trees, computes dists, and processes metadata via Augur to generate Auspice JSON output.",
+      "container": "quay.io/biocontainers/grapetree:2.1--pyh3252c3a_0",
+      "input_types": [
+        "allelic_profile_tsv",
+        "metadata_tsv",
+        "geodata_tsv"
+      ],
+      "out": [],
+      "params": [],
+      "compatible_seq_types": ["multi_sample"],
+      "notes": "Produces both standard GrapeTree output and a RapidNJ-specific tree. Includes `cgmlst-dists` evaluation."
+    },
+    {
+      "id": "multi_alignment__snippycore",
+      "domain": "Alignment",
+      "tool": "Snippy & Snippy-Core",
+      "description": "Core genome SNP calling pipeline. Aligns sequence reads (Illumina paired-end, IonTorrent single-end) or direct FASTA assemblies against a reference using Snippy, then aggregates multiple VCF results into a core-SNP matrix using Snippy-Core.",
+      "container": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a",
+      "input_types": [
+        "sequence_reads",
+        "assemblies_fasta",
+        "variants_vcf",
+        "reference_genome_genbank"
+      ],
+      "out": [],
+      "params": [],
+      "compatible_seq_types": ["illumina_paired", "ion", "multi_sample"],
+      "notes": "Automatically toggles parameters for single vs paired end reads, and accepts pre-computed VCF directories to run Snippy-Core exclusively."
+    },
+    {
+      "id": "multi_clustering__ksnp3",
+      "domain": "Phylogeny",
+      "tool": "kSNP3",
+      "description": "Reference-free SNP discovery and phylogenetic analysis tool. Constructs k-mer based SNP matrices (Core or All), builds Maximum Likelihood trees with IQ-TREE, processes with GrapeTree, and exports an Auspice JSON using Augur.",
+      "container": "ghcr.io/genpat-it/ksnp3:3.0--addd2c2d0e",
+      "input_types": [
+        "assemblies_fasta",
+        "metadata_tsv",
+        "geodata_tsv"
+      ],
+      "out": [],
+      "params": [
+        "--kmers_size",
+        "--analysis_type"
+      ],
+      "compatible_seq_types": ["multi_sample"],
+      "notes": "Toggles between generating a Core-SNP matrix or All-SNPs matrix depending on the `--analysis_type` parameter. Substitutes dashes for dots in sequence headers to comply with IQ-TREE requirements."
+    },
+    {
+      "id": "module_qc_fastqc",
+      "domain": "Quality Control",
+      "tool": "FastQC",
+      "description": "Performs quality control checks on raw sequence data using FastQC. Generates comprehensive HTML reports and zip archives of QC metrics.",
+      "container": "biocontainers/fastqc:v0.11.5_cv4",
+      "input_types": [
+        "sequence_reads"
+      ],
+      "out": [],
+      "params": [],
+      "compatible_seq_types": [
+        "illumina_paired", 
+        "ion"
+      ],
+      "notes": "Specifically gated to run only on Illumina paired-end and Ion Torrent data. Outputs are dynamically renamed with the execution timestamp."
+    },
+    {
+      "id": "module_qc_nanoplot",
+      "domain": "Quality Control",
+      "tool": "NanoPlot",
+      "description": "Calculates statistics and generates interactive HTML summary plots for long-read sequencing data using NanoPlot.",
+      "container": "quay.io/biocontainers/nanoplot:1.41.3--pyhdfd78af_0",
+      "input_types": [
+        "sequence_reads"
+      ],
+      "out": [],
+      "params": [
+        "--max_cpus"
+      ],
+      "compatible_seq_types": [
+        "nanopore"
+      ],
+      "notes": "Restricted to Nanopore sequencing data. Runs with '--tsv_stats' and '--no_static' flags to optimize for web rendering and parsing."
+    },
+    {
+      "id": "module_qc_quast",
+      "domain": "Quality Control",
+      "tool": "QUAST",
+      "description": "Evaluates genome assembly quality. Runs QUAST on input assemblies, extracts key metrics using shell utilities, and aggregates results across multiple samples into a single summary TSV.",
+      "container": "quay.io/biocontainers/quast:4.4--boost1.61_1",
+      "input_types": [
+        "assemblies_fasta"
+      ],
+      "out": [],
+      "params": [],
+      "compatible_seq_types": [
+        "all"
+      ],
+      "notes": "Includes a secondary 'summary' process running on Ubuntu to concatenate individual sample TSVs into a master summary report. Uses the '--fast' flag for rapid evaluation."
     }
   ]
 }
