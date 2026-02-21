@@ -576,7 +576,7 @@ class NextflowWorkflow(BaseModel):
         extracted_channels = set()
         
         for stmt in self.body:
-            if isinstance(stmt, ProcessCall):
+            if hasattr(stmt, 'type') and stmt.type == 'process_call':
                 for arg in stmt.args:
                     arg_name = None
                     if isinstance(arg, dict) and arg.get("type") == "variable":
@@ -592,15 +592,24 @@ class NextflowWorkflow(BaseModel):
                             else:
                                 arg.name = base_var
                                 
-            elif isinstance(stmt, ChannelChain):
+            elif hasattr(stmt, 'type') and stmt.type == 'channel_chain':
                 if stmt.start_variable and '.' in stmt.start_variable:
                     base_var = stmt.start_variable.split('.')[0]
                     if base_var in extracted_channels:
                         stmt.start_variable = base_var
 
-            if isinstance(stmt, ProcessCall):
+            elif hasattr(stmt, 'type') and stmt.type == 'assignment':
+                if stmt.value and isinstance(stmt.value, str) and '.' in stmt.value:
+                    base_var = stmt.value.split('.')[0]
+                    if base_var in extracted_channels:
+                        stmt.value = base_var
+
+            if hasattr(stmt, 'type') and stmt.type == 'process_call':
                 if stmt.assign_to and stmt.output_attribute:
                     extracted_channels.add(stmt.assign_to)
+            elif hasattr(stmt, 'type') and stmt.type == 'assignment':
+                if stmt.variable:
+                    extracted_channels.add(stmt.variable)
                     
         for emit in self.emit_channels:
             if emit.internal_variable and '.' in emit.internal_variable:
