@@ -12,34 +12,42 @@ class DataLoader:
         self.tmpl_db = {}
         self.res_list = []
 
-    def load_all(self):
+    def load_all(self, store=None):
         print("Loading Resources...")
-        self._load_lookups()
+        self._load_lookups(store)
         self._load_vector_store()
         print("✅ Resources Loaded.")
 
-    def _load_lookups(self):
+    def _load_lookups(self, store=None):
         # Load Code Store
         if os.path.exists(settings.CODE_STORE):
             with open(settings.CODE_STORE, 'r') as f:
                 for line in f:
                     try:
                         entry = json.loads(line)
-                        if entry.get('id'): self.code_db[entry['id']] = entry['content']
+                        if entry.get('id'): 
+                            self.code_db[entry['id']] = entry['content']
+                            if store: store.put(("code",), entry['id'], {"content": entry['content']})
                     except: continue
 
         # Load Catalogs
         if os.path.exists(settings.CATALOG_COMPONENTS):
             with open(settings.CATALOG_COMPONENTS, 'r') as f:
                 self.comp_db = {c['id']: c for c in json.load(f).get('components', [])}
+                if store:
+                    for k,v in self.comp_db.items(): store.put(("components",), k, v)
                 
         if os.path.exists(settings.CATALOG_TEMPLATES):
             with open(settings.CATALOG_TEMPLATES, 'r') as f:
                 self.tmpl_db = {c['id']: c for c in json.load(f).get('templates', [])}
+                if store:
+                    for k,v in self.tmpl_db.items(): store.put(("templates",), k, v)
                
         if os.path.exists(settings.CATALOG_RESOURCES):
             with open(settings.CATALOG_RESOURCES, 'r') as f:
                 self.res_list = json.load(f).get('resources', {}).get('helper_functions', [])
+                if store:
+                    store.put(("resources",), "helper_functions", {"list": self.res_list})
 
     def _load_vector_store(self):
         print(f"Loading Embeddings {settings.EMBEDDING_MODEL} (CPU)...")

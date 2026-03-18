@@ -11,6 +11,7 @@ from app.services.graph_state import GraphState
 from app.models.consultant_structure import ConsultantOutput
 from app.models.diagram_structure import MermaidOutput
 from app.core.loader import data_loader
+from langgraph.store.base import BaseStore
 
 # ==========================================
 # 1. SYSTEM PROMPTS
@@ -75,7 +76,7 @@ Your ONLY job is to read a final Nextflow DSL2 script and create a Mermaid flowc
 # 2. GRAPH NODES
 # ==========================================
 
-def consultant_node(state: GraphState):
+def consultant_node(state: GraphState, store: BaseStore):
     print("--- [NODE] CONSULTANT (Interactive Planner) ---")
     llm = get_llm()
     
@@ -85,7 +86,7 @@ def consultant_node(state: GraphState):
     if current_messages:
         latest_query = current_messages[-1].content
 
-    metadata_context = retrieve_rag_context(latest_query, embed_code=False)
+    metadata_context = retrieve_rag_context(latest_query, store, embed_code=False)
     print(f"[Consultant] RAG Context Retrieved: {len(metadata_context)} chars")
 
     prompt = ChatPromptTemplate.from_messages([
@@ -202,7 +203,7 @@ def filter_template_logic(code: str, allowed_components: set) -> str:
         
     return "\n".join(filtered_lines)
 
-def hydrator_node(state: GraphState):
+def hydrator_node(state: GraphState, store: BaseStore):
     print("--- [NODE] HYDRATOR (Context Assembly) ---")
 
     if state.get("error"):
@@ -216,26 +217,26 @@ def hydrator_node(state: GraphState):
     module_ids = state.get('selected_module_ids', [])
     plan_text = state.get('design_plan', '')
 
-    TMPL_DB = data_loader.tmpl_db
-    CODE_DB = data_loader.code_db
-    RES_LIST = data_loader.res_list
-    
-    helper_names = []
-    for r in RES_LIST:
-        helper_names.append(r['name'])
+    # Access Data from Store
+    RES_ITEM = store.get(("resources",), "helper_functions")
+    RES_LIST = RES_ITEM.value.get("list", []) if RES_ITEM else []
+    helper_names = [r['name'] for r in RES_LIST]
 
     # ==========================================
     # PATH A: STRICT TEMPLATE MODE
     # ==========================================
     if strategy == "EXACT_MATCH" and used_template_id:
         tmpl_id = used_template_id
-        template_def = TMPL_DB.get(tmpl_id)
+        tmpl_item = store.get(("templates",), tmpl_id)
+        template_def = tmpl_item.value if tmpl_item else None
 
         context_parts.append(f"### STRICT TEMPLATE MODE: {tmpl_id}")
         if template_def:
             context_parts.append(f"Description: {template_def.get('description')}")
             
-            tmpl_code = CODE_DB.get(tmpl_id)
+            code_item = store.get(("code",), tmpl_id)
+            tmpl_code = code_item.value.get("content") if code_item else None
+            
             if tmpl_code:
                 context_parts.append(f"[[TEMPLATE SOURCE CODE: {tmpl_id}]]")
                 context_parts.append("INSTRUCTION: Use the logic in this workflow block exactly.")
@@ -248,7 +249,8 @@ def hydrator_node(state: GraphState):
             for step in template_def.get('logic_flow', []):
                 if 'step' in step:
                     comp_id = step['step']
-                    code = CODE_DB.get(comp_id)
+                    c_item = store.get(("code",), comp_id)
+                    code = c_item.value.get("content") if c_item else None
                     if code:
                         context_parts.append(f"[[REFERENCE FOR STEP: {comp_id}]]")
                         context_parts.append(f"```groovy\n{code.strip()}\n```")
@@ -263,7 +265,8 @@ def hydrator_node(state: GraphState):
     else:
         if strategy == "ADAPTED_MATCH" and used_template_id:
             context_parts.append(f"### ADAPTED TEMPLATE MODE: Based on {used_template_id}")
-            tmpl_code = CODE_DB.get(used_template_id)
+            t_item = store.get(("code",), used_template_id)
+            tmpl_code = t_item.value.get("content") if t_item else None
 
             if tmpl_code:
                 # We combine the template ID and the new module IDs into the allowed list
@@ -286,7 +289,9 @@ def hydrator_node(state: GraphState):
             if comp_id == used_template_id and strategy == "ADAPTED_MATCH":
                 continue
 
-            source_code = CODE_DB.get(comp_id)
+            code_item = store.get(("code",), comp_id)
+            source_code = code_item.value.get("content") if code_item else None
+            
             if source_code:
                 context_parts.append(f"[[REFERENCE FOR STEP: {comp_id}]]")
                 context_parts.append(f"Component ID: {comp_id}")

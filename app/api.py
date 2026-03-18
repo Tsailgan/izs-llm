@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 
 # Import your custom modules
 from app.core.loader import data_loader
-from app.services.graph import app_graph
+from app.services.graph import app_graph, global_store
 
 # --- 1. DATA MODELS (Request/Response) ---
 class ChatRequest(BaseModel):
@@ -24,7 +24,7 @@ class ChatResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        data_loader.load_all()
+        data_loader.load_all(store=global_store)
     except Exception as e:
         print(f"CRITICAL STARTUP ERROR {e}")
     yield

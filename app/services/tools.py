@@ -3,16 +3,19 @@ import re
 from app.core.loader import data_loader
 from app.services.graph_state import GraphState
 
-def _inject_component(comp_id, found_ids, context_blocks, embed_code=True):
-    COMP_DB = data_loader.comp_db
-    CODE_DB = data_loader.code_db
-    
+from langgraph.store.base import BaseStore
+
+def _inject_component(comp_id, found_ids, context_blocks, store: BaseStore, embed_code=True):
     if comp_id in found_ids: return
-    if comp_id not in COMP_DB: return
+    
+    comp_item = store.get(("components",), comp_id)
+    if not comp_item: return
+    comp_data = comp_item.value
 
     found_ids.add(comp_id)
-    comp_data = COMP_DB[comp_id]
-    code_snippet = CODE_DB.get(comp_id, "// Code not found in repository")
+    
+    code_item = store.get(("code",), comp_id)
+    code_snippet = code_item.value.get("content", "// Code not found") if code_item else "// Code not found in repository"
 
     block = f"""
 --- COMPONENT: {comp_id} ---
@@ -28,24 +31,24 @@ OUTPUTS: {', '.join(comp_data.get('out', []))}
 
     context_blocks.append(block)
 
-def _inject_template(template_id, found_ids, context_blocks, embed_code=True):
-    TMPL_DB = data_loader.tmpl_db
-    CODE_DB = data_loader.code_db
-
+def _inject_template(template_id, found_ids, context_blocks, store: BaseStore, embed_code=True):
     if template_id in found_ids: return
-    if template_id not in TMPL_DB: return
+    
+    tmpl_item = store.get(("templates",), template_id)
+    if not tmpl_item: return
 
     found_ids.add(template_id)
 
     block = ""
 
     if embed_code:
-        code_snippet = CODE_DB.get(template_id, "// Code not found in repository")
+        code_item = store.get(("code",), template_id)
+        code_snippet = code_item.value.get("content", "// Code not found") if code_item else "// Code not found in repository"
         block += f"\n**SOURCE CODE ({template_id}.nf):**\n```groovy\n{code_snippet}\n```\n"
 
     context_blocks.append(block)
 
-def retrieve_rag_context(user_query, embed_code=False):
+def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
     """Retrieves similar documents from Vector Store."""
     if not data_loader.vector_store:
         return "Vector Store not loaded."
@@ -53,8 +56,6 @@ def retrieve_rag_context(user_query, embed_code=False):
     docs = data_loader.vector_store.similarity_search(user_query, k=10)
 
     print(docs)
-
-    TMPL_DB = data_loader.tmpl_db
 
     found_ids = set()
     context_blocks = []
@@ -69,13 +70,12 @@ def retrieve_rag_context(user_query, embed_code=False):
             continue
 
         # --- PATH 1: TEMPLATE (Pipeline Blueprint) ---
-        if item_type == 'template' and item_id in TMPL_DB:
-            tmpl = TMPL_DB[item_id]
-            # Mark template as found
-        
-            context_blocks.append(f"### PIPELINE BLUEPRINT: {item_id}\n{doc.page_content}")
-            # print("This should injec tthe template details into the context")
-            _inject_template(tmpl['id'], found_ids, context_blocks, embed_code=True)
+        if item_type == 'template':
+            tmpl_item = store.get(("templates",), item_id)
+            if tmpl_item:
+                tmpl = tmpl_item.value
+                context_blocks.append(f"### PIPELINE BLUEPRINT: {item_id}\n{doc.page_content}")
+                _inject_template(tmpl['id'], found_ids, context_blocks, store, embed_code=True)
 
             found_ids.add(item_id)
 
@@ -84,31 +84,31 @@ def retrieve_rag_context(user_query, embed_code=False):
 
                 # Direct Steps
                 if 'step' in flow_step:
-                    _inject_component(flow_step['step'], found_ids, context_blocks, embed_code)
+                    _inject_component(flow_step['step'], found_ids, context_blocks, store, embed_code)
 
                 # Complex Logic (Parallel/Branching/Next)
                 for sub_key in ['parallel_execution', 'branches', 'options']:
                     if sub_key in flow_step:
                         for item in flow_step[sub_key]:
                             if 'step' in item:
-                                _inject_component(item['step'], found_ids, context_blocks, embed_code)
+                                _inject_component(item['step'], found_ids, context_blocks, store, embed_code)
 
                             # Handle 'next' chaining
                             if 'next' in item:
                                 for sub_item in item['next']:
                                     if 'step' in sub_item:
-                                        _inject_component(sub_item['step'], found_ids, context_blocks, embed_code)
+                                        _inject_component(sub_item['step'], found_ids, context_blocks, store, embed_code)
 
         # --- PATH 2: COMPONENT (Direct Hit) ---
         elif item_type == 'component':
             # Always embed code for direct hits too
-            _inject_component(item_id, found_ids, context_blocks, embed_code)
+            _inject_component(item_id, found_ids, context_blocks, store, embed_code)
 
     final_context = "\n".join(context_blocks) + "\n\n"
 
     return final_context
 
-def hydrator_node(state: GraphState):
+def hydrator_node(state: GraphState, store: BaseStore):
     print("--- [NODE] HYDRATOR (Context Assembly) ---")
 
     if state.get("error"):
@@ -126,10 +126,9 @@ def hydrator_node(state: GraphState):
     components = plan.get('components', [])
     workflow_logic = plan.get('workflow_logic', [])
 
-    # Access Global Data
-    TMPL_DB = data_loader.tmpl_db
-    CODE_DB = data_loader.code_db
-    RES_LIST = data_loader.res_list
+    # Access Store
+    RES_ITEM = store.get(("resources",), "helper_functions")
+    RES_LIST = RES_ITEM.value.get("list", []) if RES_ITEM else []
     HELPER_NAMES = {r['name'] for r in RES_LIST}
 
     # ==========================================
@@ -137,14 +136,16 @@ def hydrator_node(state: GraphState):
     # ==========================================
     if strategy == "EXACT_MATCH" and used_template_id:
         tmpl_id = used_template_id
-        template_def = TMPL_DB.get(tmpl_id)
+        tmpl_item = store.get(("templates",), tmpl_id)
+        template_def = tmpl_item.value if tmpl_item else None
 
         context_parts.append(f"### STRICT TEMPLATE MODE: {tmpl_id}")
         if template_def:
             context_parts.append(f"Description: {template_def.get('description')}")
             
             # 1. Get Template Source
-            tmpl_code = CODE_DB.get(tmpl_id)
+            code_item = store.get(("code",), tmpl_id)
+            tmpl_code = code_item.value.get("content") if code_item else None
             if tmpl_code:
                 context_parts.append(f"[[TEMPLATE SOURCE CODE: {tmpl_id}]]")
                 context_parts.append("INSTRUCTION: Use the logic in this workflow block exactly.")
@@ -158,7 +159,8 @@ def hydrator_node(state: GraphState):
             for step in template_def.get('logic_flow', []):
                 if 'step' in step:
                     comp_id = step['step']
-                    code = CODE_DB.get(comp_id)
+                    c_item = store.get(("code",), comp_id)
+                    code = c_item.value.get("content") if c_item else None
                     if code:
                         context_parts.append(f"[[REFERENCE FOR STEP: {comp_id}]]")
                         context_parts.append(f"```groovy\n{code.strip()}\n```")
@@ -174,7 +176,8 @@ def hydrator_node(state: GraphState):
         # 1. Handle Template Inheritance (Adapted Mode)
         if strategy == "ADAPTED_MATCH" and used_template_id:
             context_parts.append(f"### ADAPTED TEMPLATE MODE: Based on {used_template_id}")
-            tmpl_code = CODE_DB.get(used_template_id)
+            t_item = store.get(("code",), used_template_id)
+            tmpl_code = t_item.value.get("content") if t_item else None
 
             if tmpl_code:
                 allowed_ids = {used_template_id}
@@ -207,7 +210,8 @@ def hydrator_node(state: GraphState):
                 if comp_id == used_template_id and strategy == "ADAPTED_MATCH":
                     continue
 
-                source_code = CODE_DB.get(comp_id)
+                code_item = store.get(("code",), comp_id)
+                source_code = code_item.value.get("content") if code_item else None
                 
                 if source_code:
                     context_parts.append(f"[[REFERENCE FOR STEP: {step_alias}]]")
