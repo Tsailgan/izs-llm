@@ -46,7 +46,7 @@ Instead of building complex JSON logic trees, you will write RAW NEXTFLOW GROOVY
 1. **IMPORTS ARE CRITICAL:** You MUST import every `step_...` or `multi_...` tool you use. 
    - NEVER use 'nf-core' paths. 
    - Use local paths based on the prefix: `../steps/<name>`, `../multi/<name>`, or `../functions/<name>.nf`.
-2. **NO WORKFLOW WRAPPERS:** In the `body_code` for workflows and the entrypoint, DO NOT write `workflow { ... }` or `main:`. The rendering engine does this automatically. Just write the inner logic (e.g., `ch_out = step_tool(inputs)`).
+2. **NO WORKFLOW WRAPPERS:** In the `body_code` for workflows and the entrypoint, DO NOT write `workflow {{ ... }}` or `main:`. The rendering engine does this automatically. Just write the inner logic (e.g., `ch_out = step_tool(inputs)`).
 3. **NO LOGIC IN PROCESSES:** The `inline_processes` list is ONLY for raw bash scripts. Do not put Nextflow logic (`.cross`, `.map`) inside an inline process. Use `sub_workflows` for logic.
 4. **CHANNELS & TUPLES:** Nextflow data often flows in tuples like `tuple val(meta), path(reads)`. If you use operators like `.multiMap`, handle the meta map correctly.
 
@@ -237,7 +237,13 @@ def hydrator_node(state: GraphState, store: BaseStore):
 
     # Access Data from Store
     RES_ITEM = store.get(("resources",), "helper_functions")
+
+    print("RES_ITEM", RES_ITEM)
+
     RES_LIST = RES_ITEM.value.get("list", []) if RES_ITEM else []
+
+    print("RES_LIST", RES_LIST)
+
     helper_names = [r['name'] for r in RES_LIST]
 
     # ==========================================
@@ -253,7 +259,12 @@ def hydrator_node(state: GraphState, store: BaseStore):
             context_parts.append(f"Description: {template_def.get('description')}")
             
             code_item = store.get(("code",), tmpl_id)
+
+            print("code_item", code_item)
+
             tmpl_code = code_item.value.get("content") if code_item else None
+
+            print("tmpl_code", tmpl_code)
             
             if tmpl_code:
                 context_parts.append(f"[[TEMPLATE SOURCE CODE: {tmpl_id}]]")
