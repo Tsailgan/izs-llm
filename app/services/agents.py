@@ -238,11 +238,7 @@ def hydrator_node(state: GraphState, store: BaseStore):
     # Access Data from Store
     RES_ITEM = store.get(("resources",), "helper_functions")
 
-    print("RES_ITEM", RES_ITEM)
-
     RES_LIST = RES_ITEM.value.get("list", []) if RES_ITEM else []
-
-    print("RES_LIST", RES_LIST)
 
     helper_names = [r['name'] for r in RES_LIST]
 
@@ -253,6 +249,10 @@ def hydrator_node(state: GraphState, store: BaseStore):
         tmpl_id = used_template_id
         tmpl_item = store.get(("templates",), tmpl_id)
         template_def = tmpl_item.value if tmpl_item else None
+
+        print("tmpl_item", tmpl_item)
+
+        print("template_def", template_def)
 
         context_parts.append(f"### STRICT TEMPLATE MODE: {tmpl_id}")
         if template_def:
