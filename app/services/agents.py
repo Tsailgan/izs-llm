@@ -66,32 +66,35 @@ Instead of building complex JSON logic trees, you will write RAW NEXTFLOW GROOVY
 DIAGRAM_SYSTEM_PROMPT = """You are a Technical Documentation Expert.
 Your ONLY job is to read a final Nextflow DSL2 script and create an extremely comprehensive, low-level Mermaid flowchart.
 
-# STRICT MERMAID RULES
+# STRICT MERMAID SYNTAX RULES (CRITICAL)
+Mermaid will CRASH if you do not follow these syntax rules exactly:
 1. Output ONLY valid Mermaid code starting with `flowchart TD`. 
 2. DO NOT add markdown backticks (```) around your output.
-3. **Map EVERYTHING:** You must visually capture every global parameter, input channel, process call, sub-workflow, and Nextflow operator.
+3. **Node IDs MUST be strictly alphanumeric and underscores.** (e.g., `step_1`, `op_map`). Do NOT use dots or spaces in the ID itself.
+4. **QUOTE ALL SPECIAL LABELS:** If a node's label contains dots (.), parentheses (), or brackets [], you MUST wrap the text inside the shape in quotes! 
+   - CORRECT: `op_multimap{{"\".multiMap\""}}`
+   - WRONG: `op_multimap{{.multiMap}}`
+   - CORRECT: `param_ref(["\"params.ref\""])`
+   - WRONG: `param_ref([params.ref])`
+5. **QUOTE ALL EDGE LABELS:** If an edge label has special characters, wrap it in quotes!
+   - CORRECT: `A -->|"getReference(it)"| B`
+   - WRONG: `A -->|getReference(it)| B`
+6. **Subgraphs and Nodes cannot share IDs.** Name your subgraphs `sg_modulename` to avoid conflicting with node IDs.
 
 # VISUAL VOCABULARY (Node Shapes)
-You MUST use these exact shapes to differentiate the architecture:
-- **Inputs & Params:** Use stadium shapes `([])` for inputs and global variables. (e.g., `param_ref([params.reference_genome])`)
-- **Processes & Workflows:** Use standard rectangles `[]` for tools and scripts. (e.g., `step_ivar[step_2AS_mapping__ivar]`)
-- **Operators:** Use rhombuses `{{}}` for Nextflow data operators like `.multiMap`, `.map`, `.mix`, `.cross`, or `.branch`. (e.g., `op_multimap{{multiMap}}`)
-- **Outputs:** Use cylinders `[()]` for final emitted channels. (e.g., `emit_results[(Emit: results)]`)
+- **Inputs & Params:** Stadium shapes `([])`. Example: `param_reads(["\"reads\""])`
+- **Processes & Workflows:** Standard rectangles `[]`. Example: `step_ivar["step_2AS_mapping__ivar"]`
+- **Operators:** Rhombuses `{{}}`. Example: `op_cross{{"\".cross\""}}`
+- **Outputs:** Cylinders `[()]`. Example: `emit_res[("Emit: consensus")]`
 
 # DATA FLOW (Edges & Labels)
 - Draw arrows `-->` to show the exact flow of data.
-- **CRITICAL:** EVERY single arrow MUST have a label `|text|` showing the exact channel name or data structure being passed. 
-- Example: `op_multimap -->|trAndRef.trimmed| step_ivar`
-- Example: `param_ref -->|referenceCode| op_multimap`
+- EVERY single arrow MUST have a label showing the exact channel name or data structure.
+- Example: `op_multimap -->|"reads: it[0]"| step_ivar`
 
 # SCOPE (Subgraphs)
 - Group the logic using Mermaid `subgraph` blocks to match the Nextflow `workflow` definitions.
-- Example:
-  ```mermaid
-  subgraph module_covid_emergency
-      op_multimap{{multiMap}}
-      step_ivar[step_2AS_mapping__ivar]
-  end
+- Connect the inputs from the `entrypoint` subgraph into the inner workflow subgraphs to show the overarching data flow.
 """
 
 # ==========================================
@@ -215,17 +218,23 @@ def diagram_node(state: GraphState):
         
     messages = prompt.invoke({"code": final_code}).to_messages()
 
-    try:
-        result = diagram_agent.invoke(messages)
-        print("[Diagram] Successfully generated Mermaid map.")
-        return {
-            "mermaid_code": result.mermaid_code
-        }
-    except Exception as e:
-        print(f"Diagram Node Failed: {str(e)}")
-        return {
-            "mermaid_code": "flowchart TD\n    Error[Diagram generation failed]"
-        }
+    # --- SELF-CORRECTING LOOP ---
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            result = diagram_agent.invoke(messages)
+            print(f"[Diagram] Successfully generated Mermaid map on attempt {attempt + 1}.")
+            return {
+                "mermaid_code": result.mermaid_code
+            }
+        except Exception as e:
+            print(f"⚠️ Diagram Syntax Error (Attempt {attempt + 1}): {str(e)}")
+            messages.append(AIMessage(content="I generated invalid Mermaid syntax."))
+            messages.append(HumanMessage(content=f"Validation Error: {str(e)}\nFix the syntax and try again. Remember to QUOTE special characters!"))
+    
+    return {
+        "mermaid_code": "flowchart TD\n    Error[\"Diagram generation failed due to repeated syntax errors\"]"
+    }
     
 def filter_template_logic(code: str, allowed_components: set) -> str:
     lines = code.split('\n')
