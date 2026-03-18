@@ -31,8 +31,12 @@ Your job is to talk with the user and design a Nextflow DSL2 pipeline step by st
 When you set status to "APPROVED", you MUST fill out the following fields based on the RAG context:
 1. `draft_plan`: A highly detailed text instruction manual for the Architect Agent. Explain how data channels connect.
 2. `strategy_selector`: Choose "EXACT_MATCH" if using a template exactly, "ADAPTED_MATCH" if modifying a template, or "CUSTOM_BUILD" if building from scratch.
-3. `used_template_id`: The exact ID of the template used (if any).
-4. `selected_module_ids`: A list of the exact IDs of the individual tools needed from the RAG context (e.g., ["step_1PP_filtering__bowtie"]).
+
+# ANTI-HALLUCINATION RULES FOR IDs
+You MUST extract the exact ID strings from the RAG context for `used_template_id` and `selected_module_ids`. 
+- DO NOT invent names.
+- DO NOT use shorthand (e.g., use `step_4TY_lineage__pangolin`, NOT `pangolin`).
+- If a tool is not in the RAG context, DO NOT include a fake ID for it.
 """
 
 ARCHITECT_SYSTEM_PROMPT = """You are the Principal Nextflow Developer.
@@ -99,7 +103,6 @@ def consultant_node(state: GraphState, store: BaseStore):
     llm = get_llm()
     
     current_messages = state.get("messages", [])
-
     latest_query = state.get('user_query', '')
     if current_messages:
         latest_query = current_messages[-1].content
@@ -122,7 +125,29 @@ def consultant_node(state: GraphState, store: BaseStore):
         })
         
         print(f"[Consultant] Status: {result.status}")
-        
+
+        if result.status == "APPROVED":
+            
+            if result.used_template_id:
+                tmpl_item = store.get(("templates",), result.used_template_id)
+                if not tmpl_item:
+                    print(f"⚠️ Consultant Hallucinated Template ID: '{result.used_template_id}'. Stripping from plan.")
+                    result.used_template_id = None
+                
+            verified_modules = []
+            for mod_id in result.selected_module_ids:
+                comp_item = store.get(("components",), mod_id)
+                if comp_item:
+                    verified_modules.append(mod_id)
+                else:
+                    tmpl_fallback = store.get(("templates",), mod_id)
+                    if tmpl_fallback:
+                        pass 
+                    else:
+                        print(f"⚠️ Consultant Hallucinated Module ID: '{mod_id}'. Stripping from plan.")
+            
+            result.selected_module_ids = verified_modules
+
         return {
             "messages": [AIMessage(content=result.response_to_user)],
             "consultant_status": result.status,
@@ -249,10 +274,6 @@ def hydrator_node(state: GraphState, store: BaseStore):
         tmpl_id = used_template_id
         tmpl_item = store.get(("templates",), tmpl_id)
         template_def = tmpl_item.value if tmpl_item else None
-
-        print("tmpl_item", tmpl_item)
-
-        print("template_def", template_def)
 
         context_parts.append(f"### STRICT TEMPLATE MODE: {tmpl_id}")
         if template_def:
