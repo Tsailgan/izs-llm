@@ -36,27 +36,27 @@ When you set status to "APPROVED", you MUST fill out the following fields based 
 """
 
 ARCHITECT_SYSTEM_PROMPT = """You are the Principal Nextflow Developer.
-Your task is to write a strict Nextflow DSL2 pipeline based on the Consultant plan.
+Your task is to write a strict Nextflow DSL2 pipeline based on the Consultant's plan.
 
 # GOAL
 You must output a JSON object matching the NextflowPipelineAST schema.
-Write RAW NEXTFLOW GROOVY CODE for the `body_code` fields.
+Instead of building complex JSON logic trees, you will write RAW NEXTFLOW GROOVY CODE for the `body_code` fields.
 
-# STRICT DSL2 RULES
-1. Never use DSL1 syntax. Do not use the `<<` operator for channels.
-2. Every sub-workflow must have explicit `take:` and `emit:` blocks if they receive or output channels.
-3. Use `include {{ PROCESS_NAME }} from 'module_path'` to import tools.
-4. Data often flows in tuples like `tuple val(meta), path(reads)`. If you use operators like `.map` or `.branch`, you must handle the meta map correctly (e.g. `.map {{ meta, reads -> [ meta, reads ] }}`).
-5. Connect tools using the exact named outputs from the modules (e.g. `ch_trimmed = TOOL(ch_raw).reads`).
-6. Do not wrap the `body_code` strings in markdown backticks. Just write the raw text.
+# STRICT DSL2 & FORMATTING RULES
+1. **IMPORTS ARE CRITICAL:** You MUST import every `step_...` or `multi_...` tool you use. 
+   - NEVER use 'nf-core' paths. 
+   - Use local paths based on the prefix: `../steps/<name>`, `../multi/<name>`, or `../functions/<name>.nf`.
+2. **NO WORKFLOW WRAPPERS:** In the `body_code` for workflows and the entrypoint, DO NOT write `workflow { ... }` or `main:`. The rendering engine does this automatically. Just write the inner logic (e.g., `ch_out = step_tool(inputs)`).
+3. **NO LOGIC IN PROCESSES:** The `inline_processes` list is ONLY for raw bash scripts. Do not put Nextflow logic (`.cross`, `.map`) inside an inline process. Use `sub_workflows` for logic.
+4. **CHANNELS & TUPLES:** Nextflow data often flows in tuples like `tuple val(meta), path(reads)`. If you use operators like `.multiMap`, handle the meta map correctly.
 
 # STRUCTURE EXPECTATIONS
-- imports: List the tools to include.
-- globals: Define standard params.
-- inline_processes: Only use this for custom bash scripts not found in the imports.
-- sub_workflows: Reusable logic blocks. Write the DSL2 logic in `body_code`.
-- main_workflow: The primary execution block. Write the DSL2 logic in `body_code`.
-- entrypoint: The trigger block. Keep it simple and just invoke the main_workflow.
+- `imports`: List the tools to include with their correct local paths.
+- `globals`: Define standard params and variables used in the pipeline.
+- `inline_processes`: Custom bash scripts not found in the RAG context.
+- `sub_workflows`: Reusable logic blocks. Write the DSL2 logic inside `body_code`.
+- `main_workflow`: The primary execution block. Write the DSL2 logic inside `body_code`.
+- `entrypoint`: The trigger block. Keep it simple and just invoke the `main_workflow`.
 """
 
 DIAGRAM_SYSTEM_PROMPT = """You are a Technical Documentation Expert.
@@ -121,7 +121,7 @@ def consultant_node(state: GraphState, store: BaseStore):
 
 
 def architect_node(state: GraphState):
-    print("--- [NODE] ARCHITECT (Code Generator) ---")
+    print("--- [NODE] ARCHITECT (Hybrid Code Generator) ---")
     if state.get("error"): return {"error": state['error']}
     
     llm = get_llm()
@@ -129,7 +129,7 @@ def architect_node(state: GraphState):
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", ARCHITECT_SYSTEM_PROMPT),
-        ("human", "APPROVED PLAN:\n{plan}\n\nTECHNICAL CONTEXT (Available Tools):\n{tech_context}")
+        ("human", "APPROVED PLAN:\n{plan}\n\nTECHNICAL CONTEXT (Available Tools & Code):\n{tech_context}")
     ])
         
     messages = prompt.invoke({
@@ -139,13 +139,13 @@ def architect_node(state: GraphState):
 
     try:
         result = architect_agent.invoke(messages)
-        print("[Architect] Successfully generated AST blocks.")
+        print("[Architect] Successfully generated Hybrid AST.")
         return {
             "ast_json": result.model_dump(),
             "validation_error": None
         }
     except Exception as e:
-        print(f"Architect Node Failed: {str(e)}")
+        print(f"⚠️ Architect Validation Failed: {str(e)}")
         return {
             "validation_error": str(e),
             "retries": state.get("retries", 0) + 1
@@ -315,6 +315,6 @@ def hydrator_node(state: GraphState, store: BaseStore):
                 context_parts.append(f"  Usage: `{res_def.get('usage')}`")
                 
     full_context = "\n\n".join(context_parts)
-    print(f"technical_context: {full_context[:200]}...")
+    print(f"technical_context: {full_context}")
 
     return {"technical_context": full_context}
