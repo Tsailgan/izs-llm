@@ -14,7 +14,7 @@ def get_llm():
     return ChatMistralAI(
         model=settings.LLM_MODEL,
         api_key=api_key,
-        temperature=0.1,
+        temperature=0.2,
         max_tokens=128000, 
         top_p=0.9,
     )

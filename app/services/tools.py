@@ -108,25 +108,6 @@ def retrieve_rag_context(user_query, embed_code=False):
 
     return final_context
 
-def filter_template_logic(code: str, allowed_components: set) -> str:
-    lines = code.split('\n')
-    filtered_lines = []
-    
-    pattern = re.compile(r'\b((?:step_|module_|multi_)[a-zA-Z0-9_]+)\s*\(')
-    
-    for line in lines:
-        match = pattern.search(line)
-        if match:
-            func_name = match.group(1)
-            
-            if func_name not in allowed_components:
-                filtered_lines.append(f"    // [REMOVED BY PLAN] {line.strip()}")
-                continue
-        
-        filtered_lines.append(line)
-        
-    return "\n".join(filtered_lines)
-
 def hydrator_node(state: GraphState):
     print("--- [NODE] HYDRATOR (Context Assembly) ---")
 

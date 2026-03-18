@@ -20,8 +20,8 @@ def repair_node(state: GraphState):
     2. Generate the **FULLY CORRECTED** JSON AST.
     """
     
-    new_messages = state["messages"] + [HumanMessage(content=repair_instruction)]
-    return {"messages": new_messages}
+    # Just return the new message. The reducer handles the rest.
+    return {"messages": [HumanMessage(content=repair_instruction)]}
 
 def should_repair(state: GraphState):
     MAX_RETRIES = 5

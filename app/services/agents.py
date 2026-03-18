@@ -1,290 +1,315 @@
-import json
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import HumanMessage
-from app.models.plan_structure import PipelinePlan
+import re
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import RemoveMessage
+
+
 from app.models.ast_structure import NextflowPipelineAST
 from app.services.llm import get_llm
 from app.services.tools import retrieve_rag_context
 from app.services.graph_state import GraphState
+from app.models.consultant_structure import ConsultantOutput
+from app.models.diagram_structure import MermaidOutput
+from app.core.loader import data_loader
 
-# --- PROMPTS ---
-PLANNER_SYSTEM_PROMPT = """You are a Principal Bioinformatics Architect.
-Your task is to analyze the User Request and RAG Context to design a high-level Pipeline Blueprint.
+# ==========================================
+# 1. SYSTEM PROMPTS
+# ==========================================
 
-# DECISION TREE (Strategy Selection)
-Follow these steps strictly.
+CONSULTANT_SYSTEM_PROMPT = """You are an Expert Bioinformatics Consultant.
+Your job is to talk with the user and design a Nextflow DSL2 pipeline step by step.
 
-1. **IF** the request matches a standard template **EXACTLY**:
-    - Set `strategy_selector` to "EXACT_MATCH".
-    - Set `used_template_id` to the matching ID.
-    - Leave `components` empty.
+# YOUR WORKFLOW
+1. Read the user message and the chat history.
+2. Look at the AVAILABLE RAG CONTEXT to see what specific tools and templates you can use.
+3. Reply to the user in plain English (`response_to_user`). Suggest a pipeline flow.
+4. Keep `status` as "CHATTING" while discussing.
+5. When the user approves the pipeline change `status` to "APPROVED".
 
-2. **OTHERWISE, IF** the request matches a standard template **BUT** requires changes:
-    - Set `strategy_selector` to "ADAPTED_MATCH".
-    - Set `used_template_id` to the base template ID.
-    - **Define Components:** List ALL tools.
-        - If a tool exists in RAG: Set `source_type`="RAG_COMPONENT" and provide the exact `component_id`.
-        - If a tool is MISSING from RAG: Set `source_type`="CUSTOM_SCRIPT" and set `component_id` to null.
-        - **Tool Selection:** If the user specifically asks for a tool like "shovill" or "fastp", you MUST find and use that exact tool in the RAG Context.
-    - **Define Logic:** Wire the components together.
-
-3. **OTHERWISE** (No template matches):
-    - Set `strategy_selector` to "CUSTOM_BUILD".
-    - Select tools from RAG or define custom scripts as needed.
-    - **Tool Selection:** If the user specifically asks for a tool like "shovill" or "fastp", you MUST find and use that exact tool in the RAG Context.
-
-# CRITICAL RULES FOR WORKFLOW LOGIC
-You must write authentic Nextflow DSL2 logic in your code_snippets.
-
-1. EXPLICIT OUTPUT ACCESS
-Never pass a raw process name to the next step. You must look at the "out" list for the specific tool in the RAG context.
-You must access the specific named output directly using a dot and the output name.
-You MUST use the EXACT name listed in the "out" list from the RAG context. Do not guess.
-Good: step_2AS_denovo__shovill(trimmed_reads).assembly
-Bad: step_2AS_denovo__shovill(trimmed_reads)
-
-2. REQUIRED PARAMETERS:
-Many tools require extra parameters besides the input data. Look at the "params" list in the RAG component. 
-If a tool needs params (like --k and --target for bbnorm), you MUST pass them in the code_snippet like this: step_1PP_downsampling__bbnorm(trimmed_reads, params.k, params.target).
-You MUST also add "k" and "target" to your global_params dictionary.
-
-3. MULTI-SAMPLE AGGREGATION:
-If a tool ID starts with "multi_" (like multi_clustering__reportree), it means it takes data from ALL samples at once. 
-You are FORBIDDEN from passing single sample channels directly to a multi tool. 
-You MUST insert a LogicStep with step_type="OPERATOR" right before it. 
-Use the .collect() operator to group the data.
-Example snippet: step_4TY_cgMLST__chewbbaca.out.alleles.collect().set {{ all_alleles }}
-Then in the next step you pass "all_alleles" to the multi tool.
-
-# EXAMPLES (Strategy Few-Shot)
-
-## Example: CUSTOM BUILD (With Params and Collection)
-**User:** "Downsample reads, then run a multisample reportree."
-**Response:**
-{{
-    "strategy_selector": "CUSTOM_BUILD",
-    "used_template_id": null,
-    "components": [
-        {{
-            "process_alias": "step_1PP_downsampling__bbnorm",
-            "source_type": "RAG_COMPONENT",
-            "component_id": "step_1PP_downsampling__bbnorm",
-            "input_type": "FastQ",
-            "output_type": "FastQ"
-        }},
-        {{
-            "process_alias": "multi_clustering__reportree",
-            "source_type": "RAG_COMPONENT",
-            "component_id": "multi_clustering__reportree",
-            "input_type": "Allele_Matrix",
-            "output_type": "Report"
-        }}
-    ],
-    "workflow_logic": [
-        {{
-            "step_type": "PROCESS_RUN",
-            "description": "Downsample reads",
-            "code_snippet": "step_1PP_downsampling__bbnorm(raw_reads, params.k, params.target)"
-        }},
-        {{
-            "step_type": "OPERATOR",
-            "description": "Collect all data for report",
-            "code_snippet": "step_1PP_downsampling__bbnorm.out.fastq_downsampled.collect().set {{ collected_data }}"
-        }},
-        {{
-            "step_type": "PROCESS_RUN",
-            "description": "Run reportree",
-            "code_snippet": "multi_clustering__reportree(collected_data)"
-        }}
-    ],
-    "global_params": {{
-        "k": "31",
-        "target": "100"
-    }}
-}}
+# WHEN APPROVED
+When you set status to "APPROVED", you MUST fill out the following fields based on the RAG context:
+1. `draft_plan`: A highly detailed text instruction manual for the Architect Agent. Explain how data channels connect.
+2. `strategy_selector`: Choose "EXACT_MATCH" if using a template exactly, "ADAPTED_MATCH" if modifying a template, or "CUSTOM_BUILD" if building from scratch.
+3. `used_template_id`: The exact ID of the template used (if any).
+4. `selected_module_ids`: A list of the exact IDs of the individual tools needed from the RAG context (e.g., ["step_1PP_filtering__bowtie"]).
 """
 
-ARCHITECT_SYSTEM_PROMPT = """
-You are the **Principal Nextflow Compiler (DSL2 Specialist)**.
-Your task is to compile a PipelinePlan (Blueprint) into a strictly validated **NextflowPipelineAST** JSON object.
+ARCHITECT_SYSTEM_PROMPT = """You are the Principal Nextflow Developer.
+Your task is to write a strict Nextflow DSL2 pipeline based on the Consultant plan.
 
 # GOAL
-Receive a design blueprint and output a JSON object adhering to the `NextflowPipelineAST` schema. You must enforce strict separation of concerns between the Entrypoint (triggers) and the Main Workflow (logic).
+You must output a JSON object matching the NextflowPipelineAST schema.
+Write RAW NEXTFLOW GROOVY CODE for the `body_code` fields.
 
-# 1. COMPONENT RESOLUTION (AST Root Fields)
-Populate the root fields of the AST based on the component type found in the context.
+# STRICT DSL2 RULES
+1. Never use DSL1 syntax. Do not use the `<<` operator for channels.
+2. Every sub-workflow must have explicit `take:` and `emit:` blocks if they receive or output channels.
+3. Use `include { PROCESS_NAME } from 'module_path'` to import tools.
+4. Data often flows in tuples like `tuple val(meta), path(reads)`. If you use operators like `.map` or `.branch`, you must handle the meta map correctly (e.g. `.map { meta, reads -> [ meta, reads ] }`).
+5. Connect tools using the exact named outputs from the modules (e.g. `ch_trimmed = TOOL(ch_raw).reads`).
+6. Do not wrap the `body_code` strings in markdown backticks. Just write the raw text.
 
-## A. Imports (`imports`)
-**Trigger:** Step ID matches a `[[REFERENCE]]` block (standard tools) or uses helper logic.
-* **Action:** Add to the `imports` list.
-* **Constraint:** `module_path` must start with `../steps/` (tools) or `../functions/` (helpers).
-* **Aliasing:** If a name conflict exists, use the format `"OriginalName as AliasName"`.
-
-## B. Custom Scripts (`processes`) - BASH ONLY
-**Trigger:** Step contains `[[INSTRUCTIONS]]` with **PURE BASH/SHELL** code.
-* **Action:** Define a `NextflowProcess`.
-* **CRITICAL CONSTRAINT:** If the instructions contain DSL2 logic (`.cross`, `.map`, `.multiMap`, `.join`), **DO NOT** put it here. Use `sub_workflows` instead.
-* **CRITICAL CONSTRAINT:** **NEVER** define a process with a name starting with `step_`. Standard tools MUST be imported.
-
-## C. Logic Helpers (`sub_workflows`) - DSL2 ONLY
-**Trigger:** Step contains `[[INSTRUCTIONS]]` that involve channel manipulation (`prepare_inputs`, `group_by_meta`, etc.).
-* **Action:** Define a `NextflowWorkflow` in the `sub_workflows` list.
-* **Usage:** These are small, reusable logic blocks called by the Entrypoint or Main Workflow.
-* **Structure:** They use `take_channels`, `emit_channels`, and a `body` containing `ChannelChain` nodes.
-
-## D. Global Definitions (`globals`)
-**Trigger:** Usage of constant paths, IDs, or reference codes (e.g., `NC_045512.2`).
-* **Action:** Create a `GlobalDef` entry.
-* **Constraint:** All constants must be defined here, never inside the workflow body.
-
-# 2. LOGIC CONSTRUCTION (Workflow Body)
-Populate `main_workflow.body` using the following strict node types.
-
-## A. Channel Chains (`ChannelChain`)
-**Trigger:** Logic requiring data manipulation (`.cross`, `.multiMap`, `.mix`).
-* **Structure:**
-    * `start_variable`: The source channel (e.g., `trimmed_ch`).
-    * `steps`: A list of `ChainOperator` objects.
-    * `set_variable`: The final variable name (e.g., `grouped_ch`).
-* **Allowed Operators:** `['cross', 'multiMap', 'map', 'mix', 'branch', 'collect', 'groupTuple', 'join', 'flatten', 'filter', 'unique', 'distinct', 'transpose', 'buffer', 'concat']`.
-* **Constraint:** Do not invent operators (e.g., `.view`, `.set` are forbidden).
-
-## B. Process Calls (`ProcessCall`)
-**Trigger:** Execution of a tool or sub-workflow.
-* **CRITICAL NAME RULE:** The `process_name` MUST be the exact tool name from the design plan (like `step_1PP_trimming__fastp`). Do not invent generic words.
-* **Field `args` (CRITICAL):** Must be a list of **Typed Objects**:
-    * **Variables:** `{{"type": "variable", "name": "ch_input"}}` (Renders as `ch_input`)
-    * **Strings:** `{{"type": "string", "value": "some_option"}}` (Renders as `'some_option'`)
-    * **Numbers:** `{{"type": "numeric", "value": 10}}`
-* **Field `assign_to`:** Create a clean variable name to hold the output (e.g., `trimmed_reads`).
-* **Field output_attribute:** If a process has multiple outputs you MUST specify the exact channel to extract here. Look at the Planner code snippet for hints like .out. If you see it you set the output_attribute to "out".
-* **Continuity:** Pass the assign_to variable from the previous step as the args variable for the current step.
-
-## C. Assignments (`Assignment`)
-**Trigger:** Simple variable aliasing.
-* **Constraint:** **NEVER** use this to run a process.
-    * *Invalid:* `variable="res", value="step_FastQC(reads)"`
-    * *Valid:* `variable="res", value="inputs.flatten()"`
-
-## D. Conditional Blocks (`ConditionalBlock`)
-**Trigger:** Optional logic (e.g., "Run only if params.skip is false").
-* **Action:** Wrap the `ProcessCall` or `ChannelChain` inside a `ConditionalBlock`.
-* **Condition:** Must be a valid Groovy string (e.g., `!params.skip_mapping`).
-
-## E. `EmitItem` (The "Silence" Rule)
-**Trigger:** Definition of workflow outputs or named channels at the end of a block..
-* **Field `emit_channels`:** The list of channels to export. DEFAULT must be an EMPTY LIST [].
-* **EXCEPTION:** Only add channels to this list if the User Blueprint explicitly contains an emit: block.
-* **Constraint** NEVER hallucinate emits just to be helpful. If the blueprint ends, the workflow ends.
-
-# 3. WORKFLOW TOPOLOGY
-## A. Main Workflow (`main_workflow`)
-This is the **Logic Core**.
-* **`take_channels`**: Define all required inputs.
-* **`body`**: Contains all `ChannelChain`, `ProcessCall`, and `Assignment` logic.
-* **`emit_channels`**: Define outputs using `EmitItem`.
-    * *Auto-Fix:* If you used `output_attribute` in a `ProcessCall`, ensure it is mapped here if it constitutes a workflow output.
-
-## B. Entrypoint (`entrypoint`)
-This is the **Trigger**.
-* **Constraint:** Strict Modularity. You are **FORBIDDEN** from defining complex logic (`.cross`, `.multiMap`) here.
-* **Inputs:** Do not use undefined variables like `raw_reads` or `trimmed`. Always use standard helper functions like `getInput()` to pass data to the module.
-* **Action:** Call helper functions and pass results to the `main_workflow` module.
-* **Validation:** The number of arguments passed to the module **MUST** match `main_workflow.take_channels`.
-
-# 4. EXECUTION MODES
-
-## Mode 1: Strict Template
-**Trigger:** Context contains `### STRICT TEMPLATE MODE`.
-**Action:** Translate the provided `[[TEMPLATE SOURCE CODE]]` **verbatim** into AST nodes. Preserve variable names and logic order exactly.
-
-## Mode 2: Hybrid Assembly
-**Trigger:** Context contains `### ADAPTED TEMPLATE MODE`.
-**Action:**
-1.  Ignore `[[TEMPLATE SOURCE CODE]]`.
-2.  Read `[[REFERENCE FOR STEP]]` for I/O requirements.
-3.  Construct logic based on `main_workflow_logic` in the Design Plan.
-
-# 5. VALIDATION CHECKLIST
-Before outputting JSON, verify:
-1.  **Scope:** Are all variables used in `emit_channels` defined in the `body` or `take_channels`?
-2.  **Continuity:** Did you pass the output of Step A (`assign_to`) as the input of Step B (`args`)?
-3.  **Globals:** Are all reference paths (e.g., `db/ref.fa`) defined in `globals`?
-4.  **Syntax:** Do `process_name`s match their imports?
+# STRUCTURE EXPECTATIONS
+- imports: List the tools to include.
+- globals: Define standard params.
+- inline_processes: Only use this for custom bash scripts not found in the imports.
+- sub_workflows: Reusable logic blocks. Write the DSL2 logic in `body_code`.
+- main_workflow: The primary execution block. Write the DSL2 logic in `body_code`.
+- entrypoint: The trigger block. Keep it simple and just invoke the main_workflow.
 """
 
-# --- NODES ---
+DIAGRAM_SYSTEM_PROMPT = """You are a Technical Documentation Expert.
+Your ONLY job is to read a final Nextflow DSL2 script and create a Mermaid flowchart diagram.
 
-def planner_node(state: GraphState):
-    print("--- [NODE] PLANNER ---")
+# RULES
+1. Output ONLY valid Mermaid code starting with `flowchart TD`.
+2. DO NOT add markdown backticks around your output.
+3. Look at the `workflow` blocks and `process` calls in the provided text.
+4. Draw a rectangular box `[]` for every process or sub-workflow called.
+5. Draw arrows `-->` showing how the data channels flow between them.
+6. Use the exact channel names from the code to label the arrows (e.g. `A -- ch_reads --> B`).
+7. Do not invent steps or tools that are not in the code.
+"""
+
+# ==========================================
+# 2. GRAPH NODES
+# ==========================================
+
+def consultant_node(state: GraphState):
+    print("--- [NODE] CONSULTANT (Interactive Planner) ---")
     llm = get_llm()
     
-    # 1. Retrieve Metadata
-    metadata_context = retrieve_rag_context(state['user_query'], embed_code=False)
+    current_messages = state.get("messages", [])
 
-    print("context: ", metadata_context)
+    latest_query = state.get('user_query', '')
+    if current_messages:
+        latest_query = current_messages[-1].content
+
+    metadata_context = retrieve_rag_context(latest_query, embed_code=False)
+    print(f"[Consultant] RAG Context Retrieved: {len(metadata_context)} chars")
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", PLANNER_SYSTEM_PROMPT),
-        ("human", "REQUEST: {query}\n\nAVAILABLE TOOLS:\n{context}")
+        ("system", CONSULTANT_SYSTEM_PROMPT + "\n\nAVAILABLE RAG CONTEXT (Tools & Templates):\n{context}"),
+        MessagesPlaceholder(variable_name="messages")
     ])
 
-    planner = llm.with_structured_output(PipelinePlan)
+    consultant_agent = llm.with_structured_output(ConsultantOutput)
+    chain = prompt | consultant_agent
 
-    messages = prompt.invoke({"query": state['user_query'], "context": metadata_context}).to_messages()
+    try:
+        result = chain.invoke({
+            "context": metadata_context,
+            "messages": current_messages
+        })
+        
+        print(f"[Consultant] Status: {result.status}")
+        
+        return {
+            "messages": [AIMessage(content=result.response_to_user)],
+            "consultant_status": result.status,
+            "design_plan": result.draft_plan if result.status == "APPROVED" else state.get("design_plan"),
+            "strategy_selector": result.strategy_selector if result.status == "APPROVED" else state.get("strategy_selector", "CUSTOM_BUILD"),
+            "used_template_id": result.used_template_id if result.status == "APPROVED" else state.get("used_template_id"),
+            "selected_module_ids": result.selected_module_ids if result.status == "APPROVED" else state.get("selected_module_ids", []),
+            "error": None
+        }
+        
+    except Exception as e:
+        print(f"💥 Consultant Node Failed: {str(e)}")
+        return {"error": f"Consultant Agent Failed: {str(e)}"}
 
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            plan = planner.invoke(messages)
-            print(f"Agent 1 Output on attempt {attempt + 1}:", plan.model_dump())
-            return {"design_plan": plan.model_dump(), "error": None}
-            
-        except Exception as e:
-            print(f"Planner Validation Error (Attempt {attempt + 1}): {str(e)}")
-            
-            if attempt == max_retries - 1:
-                return {"error": f"Planner failed after {max_retries} attempts: {str(e)}"}
-            
-            error_msg = f"Your previous response failed validation. Error:\n{str(e)}\nPlease fix the mistake and generate the JSON again."
-            messages.append(HumanMessage(content=error_msg))
 
 def architect_node(state: GraphState):
-    print("--- [NODE] ARCHITECT ---")
+    print("--- [NODE] ARCHITECT (Code Generator) ---")
     if state.get("error"): return {"error": state['error']}
     
     llm = get_llm()
-    architect = llm.with_structured_output(NextflowPipelineAST, method="json_schema", include_raw=False)
+    architect_agent = llm.with_structured_output(NextflowPipelineAST, method="json_schema", include_raw=False)
 
-    if not state.get("messages"):
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", ARCHITECT_SYSTEM_PROMPT),
-            ("human", """
-            # 1. USER PROMPT: {user_query}
-            # 2. DESIGN PLAN: {plan}
-            # 3. TECHNICAL CONTEXT: {tech_context}
-            """)
-        ])
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", ARCHITECT_SYSTEM_PROMPT),
+        ("human", "APPROVED PLAN:\n{plan}\n\nTECHNICAL CONTEXT (Available Tools):\n{tech_context}")
+    ])
         
-        messages = prompt.invoke({
-            "user_query": state['user_query'],
-            "plan": json.dumps(state['design_plan'], indent=2),
-            "tech_context": state['technical_context']
-        }).to_messages()
-    else:
-        messages = state["messages"]
+    messages = prompt.invoke({
+        "plan": state.get('design_plan', 'No plan provided.'),
+        "tech_context": state.get('technical_context', 'No context provided.')
+    }).to_messages()
 
     try:
-        result = architect.invoke(messages)
+        result = architect_agent.invoke(messages)
+        print("[Architect] Successfully generated AST blocks.")
         return {
             "ast_json": result.model_dump(),
-            "validation_error": None,
-            "messages": messages
+            "validation_error": None
         }
     except Exception as e:
-        print(f"Architect Failed: {str(e)}")
+        print(f"Architect Node Failed: {str(e)}")
         return {
             "validation_error": str(e),
-            "retries": state.get("retries", 0) + 1,
-            "messages": messages
+            "retries": state.get("retries", 0) + 1
         }
+    
+
+def diagram_node(state: GraphState):
+    print("--- [NODE] DIAGRAM AGENT (Mermaid Sync) ---")
+    if state.get("error"): return {"error": state['error']}
+    
+    final_code = state.get("nextflow_code", "")
+    
+    if not final_code:
+        print("[Diagram] Warning: No Nextflow code found. Skipping diagram.")
+        return {"mermaid_code": "flowchart TD\n    Empty[No code generated]"}
+
+    llm = get_llm()
+    diagram_agent = llm.with_structured_output(MermaidOutput)
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", DIAGRAM_SYSTEM_PROMPT),
+        ("human", "Generate a Mermaid diagram for this final Nextflow code:\n\n{code}")
+    ])
+        
+    messages = prompt.invoke({"code": final_code}).to_messages()
+
+    try:
+        result = diagram_agent.invoke(messages)
+        print("[Diagram] Successfully generated Mermaid map.")
+        return {
+            "mermaid_code": result.mermaid_code
+        }
+    except Exception as e:
+        print(f"Diagram Node Failed: {str(e)}")
+        return {
+            "mermaid_code": "flowchart TD\n    Error[Diagram generation failed]"
+        }
+    
+def filter_template_logic(code: str, allowed_components: set) -> str:
+    lines = code.split('\n')
+    filtered_lines = []
+    
+    pattern = re.compile(r'\b((?:step_|module_|multi_)[a-zA-Z0-9_]+)\s*\(')
+    
+    for line in lines:
+        match = pattern.search(line)
+        if match:
+            func_name = match.group(1)
+            
+            if func_name not in allowed_components:
+                filtered_lines.append(f"    // [REMOVED BY PLAN] {line.strip()}")
+                continue
+        
+        filtered_lines.append(line)
+        
+    return "\n".join(filtered_lines)
+
+def hydrator_node(state: GraphState):
+    print("--- [NODE] HYDRATOR (Context Assembly) ---")
+
+    if state.get("error"):
+        return {"error": state["error"]}
+    
+    context_parts = []
+    detected_helpers = set()
+
+    strategy = state.get('strategy_selector', 'CUSTOM_BUILD')
+    used_template_id = state.get('used_template_id')
+    module_ids = state.get('selected_module_ids', [])
+    plan_text = state.get('design_plan', '')
+
+    TMPL_DB = data_loader.tmpl_db
+    CODE_DB = data_loader.code_db
+    RES_LIST = data_loader.res_list
+    
+    helper_names = []
+    for r in RES_LIST:
+        helper_names.append(r['name'])
+
+    # ==========================================
+    # PATH A: STRICT TEMPLATE MODE
+    # ==========================================
+    if strategy == "EXACT_MATCH" and used_template_id:
+        tmpl_id = used_template_id
+        template_def = TMPL_DB.get(tmpl_id)
+
+        context_parts.append(f"### STRICT TEMPLATE MODE: {tmpl_id}")
+        if template_def:
+            context_parts.append(f"Description: {template_def.get('description')}")
+            
+            tmpl_code = CODE_DB.get(tmpl_id)
+            if tmpl_code:
+                context_parts.append(f"[[TEMPLATE SOURCE CODE: {tmpl_id}]]")
+                context_parts.append("INSTRUCTION: Use the logic in this workflow block exactly.")
+                context_parts.append(f"```groovy\n{tmpl_code.strip()}\n```")
+                context_parts.append(f"[[END TEMPLATE SOURCE]]")
+                
+                for h in helper_names:
+                    if h in tmpl_code: detected_helpers.add(h)
+            
+            for step in template_def.get('logic_flow', []):
+                if 'step' in step:
+                    comp_id = step['step']
+                    code = CODE_DB.get(comp_id)
+                    if code:
+                        context_parts.append(f"[[REFERENCE FOR STEP: {comp_id}]]")
+                        context_parts.append(f"```groovy\n{code.strip()}\n```")
+                        context_parts.append(f"[[END REFERENCE]]")
+                        
+                        for h in helper_names:
+                            if h in code: detected_helpers.add(h)
+
+    # ==========================================
+    # PATH B: ADAPTED OR CUSTOM MODE
+    # ==========================================
+    else:
+        if strategy == "ADAPTED_MATCH" and used_template_id:
+            context_parts.append(f"### ADAPTED TEMPLATE MODE: Based on {used_template_id}")
+            tmpl_code = CODE_DB.get(used_template_id)
+
+            if tmpl_code:
+                # We combine the template ID and the new module IDs into the allowed list
+                allowed_ids = set([used_template_id] + module_ids)
+                
+                filtered_code = filter_template_logic(tmpl_code, allowed_ids)
+
+                context_parts.append(f"[[TEMPLATE SOURCE CODE: {used_template_id}]]")
+                context_parts.append("INFO: Some steps in this template have been commented out because they are not in your Design Plan.")
+                context_parts.append("INSTRUCTION: Reuse the logic that remains, but FILL THE GAPS using your new components.")
+                context_parts.append(f"```groovy\n{filtered_code.strip()}\n```")
+                
+                for h in helper_names:
+                    if h in tmpl_code: detected_helpers.add(h)        
+        else:
+            context_parts.append("### CUSTOM BUILD MODE")
+
+        # We loop through the simple list of strings now
+        for comp_id in module_ids:
+            if comp_id == used_template_id and strategy == "ADAPTED_MATCH":
+                continue
+
+            source_code = CODE_DB.get(comp_id)
+            if source_code:
+                context_parts.append(f"[[REFERENCE FOR STEP: {comp_id}]]")
+                context_parts.append(f"Component ID: {comp_id}")
+                context_parts.append(f"```groovy\n{source_code.strip()}\n```")
+                context_parts.append(f"[[END REFERENCE: {comp_id}]]")
+                for h in helper_names:
+                    if h in source_code: detected_helpers.add(h)
+
+    # ==========================================
+    # RESOURCE INJECTION
+    # ==========================================
+    if plan_text and ("cross" in plan_text or "multiMap" in plan_text):
+        detected_helpers.add("extractKey")
+    
+    if detected_helpers:
+        context_parts.append("\n### AVAILABLE HELPER FUNCTIONS")
+        for h_name in detected_helpers:
+            res_def = next((r for r in RES_LIST if r['name'] == h_name), None)
+            if res_def:
+                context_parts.append(f"- {h_name}: {res_def.get('description')}")
+                context_parts.append(f"  Usage: `{res_def.get('usage')}`")
+                
+    full_context = "\n\n".join(context_parts)
+    print(f"technical_context: {full_context[:200]}...")
+
+    return {"technical_context": full_context}
