@@ -68,33 +68,37 @@ Your ONLY job is to read a final Nextflow DSL2 script and create an extremely co
 
 # STRICT MERMAID SYNTAX RULES (CRITICAL)
 Mermaid will CRASH if you do not follow these syntax rules exactly:
-1. Output ONLY valid Mermaid code starting with `flowchart TD`. 
+1. Output ONLY valid Mermaid code starting with `flowchart TD`.
 2. DO NOT add markdown backticks (```) around your output.
-3. **Node IDs MUST be strictly alphanumeric and underscores.** (e.g., `step_1`, `op_map`). Do NOT use dots or spaces in the ID itself.
-4. **QUOTE ALL SPECIAL LABELS:** If a node's label contains dots (.), parentheses (), or brackets [], you MUST wrap the text inside the shape in quotes! 
+3. **Node IDs MUST be strictly alphanumeric and underscores.** (e.g., `step_1`, `op_map`). Do NOT use dots, dashes, or spaces in the ID itself.
+4. **QUOTE ALL LABELS:** You MUST wrap EVERY label inside shapes and edges in double quotes to prevent parser crashes!
    - CORRECT: `op_multimap{{"\".multiMap\""}}`
    - WRONG: `op_multimap{{.multiMap}}`
    - CORRECT: `param_ref(["\"params.ref\""])`
    - WRONG: `param_ref([params.ref])`
-5. **QUOTE ALL EDGE LABELS:** If an edge label has special characters, wrap it in quotes!
+5. **QUOTE ALL EDGE LABELS:**
    - CORRECT: `A -->|"getReference(it)"| B`
    - WRONG: `A -->|getReference(it)| B`
-6. **Subgraphs and Nodes cannot share IDs.** Name your subgraphs `sg_modulename` to avoid conflicting with node IDs.
+6. **Subgraphs and Nodes cannot share IDs.** Prefix subgraphs with `sg_` (e.g., `sg_entrypoint`, `sg_module_westnile`).
+7. **No Floating Nodes:** Every node you draw MUST be connected to the flow.
 
 # VISUAL VOCABULARY (Node Shapes)
-- **Inputs & Params:** Stadium shapes `([])`. Example: `param_reads(["\"reads\""])`
-- **Processes & Workflows:** Standard rectangles `[]`. Example: `step_ivar["step_2AS_mapping__ivar"]`
-- **Operators:** Rhombuses `{{}}`. Example: `op_cross{{"\".cross\""}}`
-- **Outputs:** Cylinders `[()]`. Example: `emit_res[("Emit: consensus")]`
+Use EXACTLY this spacing and bracketing. Do not invent new shapes.
+- **Inputs & Params:** Stadium shapes -> `node_id(["\"Label Name\""])`
+- **Processes & Workflows:** Rectangles -> `node_id["\"Label Name\""]`
+- **Operators:** Rhombus -> `node_id{{"\"Label Name\""}}` (Note: operators include .map, .cross, .multiMap, .mix, .join, .branch)
+- **Outputs:** Cylinders -> `node_id[("\"Label Name\"")]`
 
 # DATA FLOW (Edges & Labels)
 - Draw arrows `-->` to show the exact flow of data.
-- EVERY single arrow MUST have a label showing the exact channel name or data structure.
-- Example: `op_multimap -->|"reads: it[0]"| step_ivar`
+- EVERY single arrow MUST have a label showing the exact channel name, tuple structure, or data type being passed.
+- **Handling Properties:** If a process outputs multiple channels (e.g., `ivar_out.consensus`, `ivar_out.bam`), draw separate arrows for each and label them with the property name (e.g., `-->|"out.consensus"|`).
+- **Handling Tuples:** If a channel is a tuple, list the contents in the label. Example: `nodeA -->|"val(meta), path(reads)"| nodeB`.
 
 # SCOPE (Subgraphs)
-- Group the logic using Mermaid `subgraph` blocks to match the Nextflow `workflow` definitions.
-- Connect the inputs from the `entrypoint` subgraph into the inner workflow subgraphs to show the overarching data flow.
+- Group the logic using Mermaid `subgraph` blocks to perfectly match the Nextflow `workflow` definitions.
+- The main execution block should be in `subgraph sg_entrypoint`.
+- Show data flowing from the entrypoint subgraph INTO the specific module subgraphs, and then back out if applicable.
 """
 
 # ==========================================
@@ -209,7 +213,7 @@ def diagram_node(state: GraphState):
         return {"mermaid_code": "flowchart TD\n    Empty[No code generated]"}
 
     llm = get_llm()
-    diagram_agent = llm.with_structured_output(MermaidOutput)
+    diagram_agent = llm.with_structured_output(MermaidOutput, method="json_schema", include_raw=False)
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", DIAGRAM_SYSTEM_PROMPT),
@@ -223,14 +227,19 @@ def diagram_node(state: GraphState):
     for attempt in range(max_retries):
         try:
             result = diagram_agent.invoke(messages)
+            
+            if not result or not hasattr(result, 'mermaid_code'):
+                raise ValueError("LLM returned an empty or invalid JSON. You MUST return a JSON object containing 'mermaid_code'.")
+
             print(f"[Diagram] Successfully generated Mermaid map on attempt {attempt + 1}.")
             return {
                 "mermaid_code": result.mermaid_code
             }
+            
         except Exception as e:
             print(f"⚠️ Diagram Syntax Error (Attempt {attempt + 1}): {str(e)}")
-            messages.append(AIMessage(content="I generated invalid Mermaid syntax."))
-            messages.append(HumanMessage(content=f"Validation Error: {str(e)}\nFix the syntax and try again. Remember to QUOTE special characters!"))
+            messages.append(AIMessage(content="I generated invalid output that crashed the parser."))
+            messages.append(HumanMessage(content=f"Validation Error: {str(e)}\nFix the syntax and try again. Remember to QUOTE special characters and strictly follow the shape formats!"))
     
     return {
         "mermaid_code": "flowchart TD\n    Error[\"Diagram generation failed due to repeated syntax errors\"]"
