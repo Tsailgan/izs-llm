@@ -45,8 +45,8 @@ Write RAW NEXTFLOW GROOVY CODE for the `body_code` fields.
 # STRICT DSL2 RULES
 1. Never use DSL1 syntax. Do not use the `<<` operator for channels.
 2. Every sub-workflow must have explicit `take:` and `emit:` blocks if they receive or output channels.
-3. Use `include { PROCESS_NAME } from 'module_path'` to import tools.
-4. Data often flows in tuples like `tuple val(meta), path(reads)`. If you use operators like `.map` or `.branch`, you must handle the meta map correctly (e.g. `.map { meta, reads -> [ meta, reads ] }`).
+3. Use `include {{ PROCESS_NAME }} from 'module_path'` to import tools.
+4. Data often flows in tuples like `tuple val(meta), path(reads)`. If you use operators like `.map` or `.branch`, you must handle the meta map correctly (e.g. `.map {{ meta, reads -> [ meta, reads ] }}`).
 5. Connect tools using the exact named outputs from the modules (e.g. `ch_trimmed = TOOL(ch_raw).reads`).
 6. Do not wrap the `body_code` strings in markdown backticks. Just write the raw text.
 
