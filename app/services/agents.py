@@ -27,6 +27,12 @@ Your job is to talk with the user and design a Nextflow DSL2 pipeline step by st
 4. Keep `status` as "CHATTING" while discussing.
 5. When the user approves the pipeline change `status` to "APPROVED".
 
+# POST-GENERATION REVISIONS (CRITICAL)
+If the user provides feedback on a pipeline you ALREADY generated (e.g., "Actually, change iVar to Bowtie", or "Add FastQC"):
+1. Acknowledge the change.
+2. If you need to discuss it more, set status to "CHATTING".
+3. If you immediately understand the change and are ready to rebuild, set status to "APPROVED" and output the entirely updated `draft_plan` and `selected_module_ids`.
+
 # WHEN APPROVED
 When you set status to "APPROVED", you MUST fill out the following fields based on the RAG context:
 1. `draft_plan`: A highly detailed text instruction manual for the Architect Agent. Explain how data channels connect.
@@ -117,8 +123,19 @@ def consultant_node(state: GraphState, store: BaseStore):
     metadata_context = retrieve_rag_context(latest_query, store, embed_code=False)
     print(f"[Consultant] RAG Context Retrieved: {len(metadata_context)} chars")
 
+    current_plan = state.get("design_plan", "No plan generated yet.")
+    current_modules = state.get("selected_module_ids", [])
+    
+    revision_context = f"""
+    # CURRENT PIPELINE STATE
+    If you are making a revision, here is the current approved state of the pipeline:
+    - Current Modules: {current_modules}
+    - Current Plan: {current_plan}
+    """
+    # --------------------------------
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", CONSULTANT_SYSTEM_PROMPT + "\n\nAVAILABLE RAG CONTEXT (Tools & Templates):\n{context}"),
+        ("system", CONSULTANT_SYSTEM_PROMPT + "\n\nAVAILABLE RAG CONTEXT (Tools & Templates):\n{context}\n\n" + revision_context),
         MessagesPlaceholder(variable_name="messages")
     ])
 
@@ -135,18 +152,21 @@ def consultant_node(state: GraphState, store: BaseStore):
 
         if result.status == "APPROVED":
             
+            # 1. Verify Template ID against the Store
             if result.used_template_id:
                 tmpl_item = store.get(("templates",), result.used_template_id)
                 if not tmpl_item:
                     print(f"⚠️ Consultant Hallucinated Template ID: '{result.used_template_id}'. Stripping from plan.")
                     result.used_template_id = None
                 
+            # 2. Verify Component IDs against the Store
             verified_modules = []
             for mod_id in result.selected_module_ids:
                 comp_item = store.get(("components",), mod_id)
                 if comp_item:
                     verified_modules.append(mod_id)
                 else:
+                    # Check if they accidentally put a template ID in the module list
                     tmpl_fallback = store.get(("templates",), mod_id)
                     if tmpl_fallback:
                         pass 
@@ -155,15 +175,28 @@ def consultant_node(state: GraphState, store: BaseStore):
             
             result.selected_module_ids = verified_modules
 
-        return {
+        # Detect a "Hard Reset" from the LLM (user asked to start over completely)
+        is_hard_reset = (result.status == "CHATTING" and result.draft_plan == "" and len(result.selected_module_ids) == 0)
+
+        # Prepare the baseline state updates
+        state_updates = {
             "messages": [AIMessage(content=result.response_to_user)],
             "consultant_status": result.status,
-            "design_plan": result.draft_plan if result.status == "APPROVED" else state.get("design_plan"),
+            "design_plan": result.draft_plan if (result.status == "APPROVED" or is_hard_reset) else state.get("design_plan"),
             "strategy_selector": result.strategy_selector if result.status == "APPROVED" else state.get("strategy_selector", "CUSTOM_BUILD"),
-            "used_template_id": result.used_template_id if result.status == "APPROVED" else state.get("used_template_id"),
-            "selected_module_ids": result.selected_module_ids if result.status == "APPROVED" else state.get("selected_module_ids", []),
+            "used_template_id": result.used_template_id if (result.status == "APPROVED" or is_hard_reset) else state.get("used_template_id"),
+            "selected_module_ids": result.selected_module_ids if (result.status == "APPROVED" or is_hard_reset) else state.get("selected_module_ids", []),
             "error": None
         }
+
+        # POST-GENERATION REVISION TRIGGER
+        # Wipe the old execution data so the frontend knows we are rebuilding or resetting
+        if result.status == "CHATTING" or (result.status == "APPROVED" and state.get("nextflow_code")):
+            state_updates["nextflow_code"] = None
+            state_updates["mermaid_code"] = None
+            state_updates["ast_json"] = None
+
+        return state_updates
         
     except Exception as e:
         print(f"💥 Consultant Node Failed: {str(e)}")
