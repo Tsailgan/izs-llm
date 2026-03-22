@@ -53,7 +53,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
     if not data_loader.vector_store:
         return "Vector Store not loaded."
     
-    docs = data_loader.vector_store.similarity_search(user_query, k=10)
+    docs = data_loader.vector_store.similarity_search(user_query, k=15)
 
     print(docs)
 
