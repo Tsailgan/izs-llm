@@ -8,6 +8,7 @@ from app.models.ast_structure import NextflowPipelineAST
 from app.services.llm import get_llm
 from app.services.tools import retrieve_rag_context
 from app.services.graph_state import GraphState
+from app.services.renderer import render_mermaid_from_json
 from app.models.consultant_structure import ConsultantOutput
 from app.models.diagram_structure import MermaidOutput
 from app.core.loader import data_loader
@@ -69,42 +70,38 @@ Instead of building complex JSON logic trees, you will write RAW NEXTFLOW GROOVY
 - `entrypoint`: The trigger block. Keep it simple and just invoke the `main_workflow`.
 """
 
-DIAGRAM_SYSTEM_PROMPT = """You are a Technical Documentation Expert.
-Your ONLY job is to read a final Nextflow DSL2 script and create an extremely comprehensive, low-level Mermaid flowchart.
+DIAGRAM_SYSTEM_PROMPT = """You are a Principal Bioinformatics Architect and Technical Documentation Expert.
+Your ONLY job is to read a final Nextflow DSL2 script and map its structural data flow into a precise JSON graph object containing `nodes` and `edges`.
 
-# STRICT MERMAID SYNTAX RULES (CRITICAL)
-Mermaid will CRASH if you do not follow these syntax rules exactly:
-1. Output ONLY valid Mermaid code starting with `flowchart TD`.
-2. DO NOT add markdown backticks (```) around your output.
-3. **Node IDs MUST be strictly alphanumeric and underscores.** (e.g., `step_1`, `op_map`). Do NOT use dots, dashes, or spaces in the ID itself.
-4. **QUOTE ALL LABELS:** You MUST wrap EVERY label inside shapes and edges in double quotes to prevent parser crashes!
-   - CORRECT: `op_multimap{{"\".multiMap\""}}`
-   - WRONG: `op_multimap{{.multiMap}}`
-   - CORRECT: `param_ref(["\"params.ref\""])`
-   - WRONG: `param_ref([params.ref])`
-5. **QUOTE ALL EDGE LABELS:**
-   - CORRECT: `A -->|"getReference(it)"| B`
-   - WRONG: `A -->|getReference(it)| B`
-6. **Subgraphs and Nodes cannot share IDs.** Prefix subgraphs with `sg_` (e.g., `sg_entrypoint`, `sg_module_westnile`).
-7. **No Floating Nodes:** Every node you draw MUST be connected to the flow.
+# GRAPH MAPPING RULES
 
-# VISUAL VOCABULARY (Node Shapes)
-Use EXACTLY this spacing and bracketing. Do not invent new shapes.
-- **Inputs & Params:** Stadium shapes -> `node_id(["\"Label Name\""])`
-- **Processes & Workflows:** Rectangles -> `node_id["\"Label Name\""]`
-- **Operators:** Rhombus -> `node_id{{"\"Label Name\""}}` (Note: operators include .map, .cross, .multiMap, .mix, .join, .branch)
-- **Outputs:** Cylinders -> `node_id[("\"Label Name\"")]`
+## 1. NODE EXTRACTION & SHAPES
+You must map EVERY component of the Nextflow script and strictly categorize them into one of these 5 shapes:
+* `input`: Use this for starting channels (e.g., `Channel.fromPath(...)`) and workflow parameters (e.g., `params.reads`).
+* `process`: Use this for tool executions (e.g., `step_fastqc(...)`) and calls to other sub-workflows.
+* `operator`: Use this for Nextflow channel operators. You MUST create a node for operators like `.map`, `.cross`, `.multiMap`, `.mix`, `.join`, and `.branch`.
+* `output`: Use this for final emitted channels (e.g., `emit: results`).
+* `global`: Use this for static global variables or constants defined at the top of the script.
 
-# DATA FLOW (Edges & Labels)
-- Draw arrows `-->` to show the exact flow of data.
-- EVERY single arrow MUST have a label showing the exact channel name, tuple structure, or data type being passed.
-- **Handling Properties:** If a process outputs multiple channels (e.g., `ivar_out.consensus`, `ivar_out.bam`), draw separate arrows for each and label them with the property name (e.g., `-->|"out.consensus"|`).
-- **Handling Tuples:** If a channel is a tuple, list the contents in the label. Example: `nodeA -->|"val(meta), path(reads)"| nodeB`.
+## 2. NODE IDs & LABELS (CRITICAL)
+* **`id`**: MUST be purely alphanumeric with underscores (e.g., `step_1`, `op_multimap`). **DO NOT use dots, dashes, or spaces in the ID.** * *Wrong:* `step.fastqc`
+    * *Right:* `step_fastqc`
+* **`label`**: The actual human-readable text. It is okay to use dots or parentheses here (e.g., `.cross`, `reads`, `getSingleInput()`).
 
-# SCOPE (Subgraphs)
-- Group the logic using Mermaid `subgraph` blocks to perfectly match the Nextflow `workflow` definitions.
-- The main execution block should be in `subgraph sg_entrypoint`.
-- Show data flowing from the entrypoint subgraph INTO the specific module subgraphs, and then back out if applicable.
+## 3. SCOPE & SUBGRAPHS
+Nextflow groups logic into `workflow` blocks. You must map this hierarchy using the `subgraph` field:
+* If a node is inside `workflow module_westnile {{ ... }}` its `subgraph` field must be `"module_westnile"`.
+* If a node is inside the unnamed main entrypoint (`workflow {{ ... }}`), its `subgraph` field must be `"entrypoint"`.
+* If a node is defined outside any workflow (like a global variable), leave `subgraph` as `null`.
+
+## 4. EDGES & DATA FLOW
+You must map how the data flows from `source` to `target`.
+* **No Floating Nodes:** Every node you create MUST be connected to at least one edge.
+* **Edge Labels:** You MUST label the edge with the exact data passing through it.
+    * If passing a channel: label it with the channel name (e.g., `"ch_ready"`).
+    * If unpacking a tuple: list the contents (e.g., `"val(meta), path(reads)"`).
+    * If accessing a process output property: label the specific property (e.g., `"out.consensus"`, `"out.bam"`).
+    * If splitting data (like after a `.multiMap`), draw separate edges for each split and label them (e.g., `"reads: it[0]"`).
 """
 
 # ==========================================
@@ -236,47 +233,43 @@ def architect_node(state: GraphState):
     
 
 def diagram_node(state: GraphState):
-    print("--- [NODE] DIAGRAM AGENT (Mermaid Sync) ---")
+    print("--- [NODE] DIAGRAM AGENT (JSON -> Python Compiler) ---")
     if state.get("error"): return {"error": state['error']}
     
     final_code = state.get("nextflow_code", "")
-    
     if not final_code:
-        print("[Diagram] Warning: No Nextflow code found. Skipping diagram.")
+        print("[Diagram] Warning: No Nextflow code found.")
         return {"mermaid_code": "flowchart TD\n    Empty[No code generated]"}
 
     llm = get_llm()
-    diagram_agent = llm.with_structured_output(MermaidOutput, method="json_schema", include_raw=False)
+    diagram_agent = llm.with_structured_output(DiagramData, method="json_schema", include_raw=False)
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", DIAGRAM_SYSTEM_PROMPT),
-        ("human", "Generate a Mermaid diagram for this final Nextflow code:\n\n{code}")
+        ("human", "Map this Nextflow code into a JSON Node/Edge Graph:\n\n{code}")
     ])
         
     messages = prompt.invoke({"code": final_code}).to_messages()
 
-    # --- SELF-CORRECTING LOOP ---
     max_retries = 3
     for attempt in range(max_retries):
         try:
             result = diagram_agent.invoke(messages)
             
-            if not result or not hasattr(result, 'mermaid_code'):
-                raise ValueError("LLM returned an empty or invalid JSON. You MUST return a JSON object containing 'mermaid_code'.")
+            if not result or not result.nodes:
+                raise ValueError("LLM returned empty graph data.")
 
-            print(f"[Diagram] Successfully generated Mermaid map on attempt {attempt + 1}.")
-            return {
-                "mermaid_code": result.mermaid_code
-            }
+            mermaid_string = render_mermaid_from_json(result)
+            
+            print(f"[Diagram] Successfully compiled Mermaid graph on attempt {attempt + 1}.")
+            return {"mermaid_code": mermaid_string}
             
         except Exception as e:
-            print(f"⚠️ Diagram Syntax Error (Attempt {attempt + 1}): {str(e)}")
-            messages.append(AIMessage(content="I generated invalid output that crashed the parser."))
-            messages.append(HumanMessage(content=f"Validation Error: {str(e)}\nFix the syntax and try again. Remember to QUOTE special characters and strictly follow the shape formats!"))
+            print(f"⚠️ Diagram Data Error (Attempt {attempt + 1}): {str(e)}")
+            messages.append(AIMessage(content="I generated an invalid JSON graph structure."))
+            messages.append(HumanMessage(content=f"Validation Error: {str(e)}\nFix the data and try again."))
     
-    return {
-        "mermaid_code": "flowchart TD\n    Error[\"Diagram generation failed due to repeated syntax errors\"]"
-    }
+    return {"mermaid_code": "flowchart TD\n    Error[\"Diagram generation failed after 3 attempts. See logs for details.\"]"}
     
 def filter_template_logic(code: str, allowed_components: set) -> str:
     lines = code.split('\n')
