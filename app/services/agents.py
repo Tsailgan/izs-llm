@@ -10,7 +10,7 @@ from app.services.tools import retrieve_rag_context
 from app.services.graph_state import GraphState
 from app.services.renderer import render_mermaid_from_json
 from app.models.consultant_structure import ConsultantOutput
-from app.models.diagram_structure import MermaidOutput
+from app.models.diagram_structure import DiagramData
 from app.core.loader import data_loader
 from langgraph.store.base import BaseStore
 
