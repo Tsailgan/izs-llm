@@ -202,13 +202,12 @@ def run_diagram_judge(judge_llm, nf_code, mermaid_code):
 # ==========================================
 
 def test_rag_retrieval_virologist_wnv():
-    """Tests the semantic retrieval capabilities of the RAG system to ensure correct pipelines are found."""
     query = "We have a large bird die-off in the area. I suspect it is West Nile. I need a pipeline to analyze the sequence data and figure out the exact viral lineage."
     context = retrieve_rag_context(query, store, embed_code=False)
     
-    assert "module_westnile" in context.lower(), "Context Relevance Failed. Missing template."
-    assert "step_4TY_lineage__westnile" in context.lower(), "Context Relevance Failed. Missing tool."
-
+    assert "module_westnile" in context, "Context Relevance Failed. Missing template."
+    assert "step_4TY_lineage__westnile" in context, "Context Relevance Failed. Missing tool."
+    
 @with_rate_limit_retry(max_attempts=3, delay_seconds=25)
 def test_consultant_logic_and_quality_virologist_wnv():
     llm = get_llm()
