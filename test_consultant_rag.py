@@ -1,4 +1,5 @@
 import pytest
+import json
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
@@ -9,6 +10,14 @@ from app.services.agents import CONSULTANT_SYSTEM_PROMPT
 from app.models.consultant_structure import ConsultantOutput
 from app.services.llm import get_llm, get_judge_llm, with_rate_limit_retry
 from app.core.loader import data_loader
+
+from langgraph.graph import StateGraph, END
+from app.services.graph_state import GraphState
+
+from app.services.graph import hydrator_node, architect_node
+from app.services.repair import repair_node, should_repair
+from app.services.renderer import renderer_node
+from app.services.graph import diagram_node
 
 store = InMemoryStore()
 
@@ -28,13 +37,25 @@ class AcademicEval(BaseModel):
     relevance_reason: str = Field(description="Step by step reasoning explaining if the AI answered the specific biological scenario from the user.")
     relevance_score: int = Field(description="Score 1 to 5 based on the rubric.")
 
+class ArchitectEval(BaseModel):
+    syntax_reason: str = Field(description="Step by step reasoning evaluating the AST's representation of Nextflow DSL2 syntax.")
+    syntax_score: int = Field(description="Score 1 to 5 based on the rubric.")
+    logic_reason: str = Field(description="Step by step reasoning evaluating if the workflows and channels match the Consultant's design plan.")
+    logic_score: int = Field(description="Score 1 to 5 based on the rubric.")
+
+class DiagramEval(BaseModel):
+    syntax_reason: str = Field(description="Step by step reasoning evaluating the Mermaid graph syntax.")
+    syntax_score: int = Field(description="Score 1 to 5 based on the rubric.")
+    mapping_reason: str = Field(description="Step by step reasoning evaluating if the graph matches the Nextflow code.")
+    mapping_score: int = Field(description="Score 1 to 5 based on the rubric.")
+
 # Reusable Agent Prompt
 CONSULTANT_TEST_PROMPT = ChatPromptTemplate.from_messages([
     ("system", CONSULTANT_SYSTEM_PROMPT + "\n\nAVAILABLE RAG CONTEXT\n{context}"),
     ("placeholder", "{messages}")
 ])
 
-# Reusable Strict Judge Prompt with Rubric
+# Reusable Strict Judge Prompt for Consultant
 JUDGE_SYSTEM_STRING = """You are a very strict academic reviewer evaluating an AI system for bioinformatics. 
 Read the RAG context and the conversation. Write your reasoning first then give the score based on these exact rules.
 
@@ -56,6 +77,53 @@ RELEVANCE SCORE RUBRIC:
 JUDGE_TEST_PROMPT = ChatPromptTemplate.from_messages([
     ("system", JUDGE_SYSTEM_STRING),
     ("human", "RAG Context\n{context}\n\nConversation History\n{chat}\n\nFinal AI Reply to Evaluate\n{reply}")
+])
+
+# Reusable Strict Judge Prompt for Architect
+PIPELINE_JUDGE_SYSTEM_STRING = """You are a senior Bioinformatics Software Engineer evaluating AI-generated Nextflow DSL2 code.
+Read the Design Plan, the injected Technical Context, and the final Nextflow Code. Write your reasoning first then score based on these exact rules.
+
+SYNTAX SCORE RUBRIC (Nextflow DSL2):
+5: Perfect. Valid Nextflow DSL2 syntax, proper imports, correct channel emissions, and valid workflow scopes.
+4: Good. Valid syntax, but minor stylistic quirks (e.g., redundant channel mapping).
+3: Okay. Missing a minor output definition or slight channel mismatch.
+2: Bad. Major Nextflow syntax violations (e.g., passing channels incorrectly between workflows).
+1: Very bad. Not recognizable as valid Nextflow code.
+
+LOGIC SCORE RUBRIC (Adherence to Plan):
+5: Perfect. The code exactly implements the requested modules and template logic from the Design Plan.
+4: Good. Implements the plan but misses a minor tool option or parameter.
+3: Okay. Implements the core plan but forgets a requested module or adds an unrequested one.
+2: Bad. Re-invents the pipeline, largely ignoring the specific template logic provided.
+1: Very bad. Completely fails to implement the Design Plan.
+"""
+
+PIPELINE_JUDGE_TEST_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", PIPELINE_JUDGE_SYSTEM_STRING),
+    ("human", "Design Plan\n{plan}\n\nTechnical Context\n{context}\n\nFinal Nextflow Code\n{code}")
+])
+
+DIAGRAM_JUDGE_SYSTEM_STRING = """You are a strict code reviewer checking a Mermaid.js diagram.
+Read the Nextflow code and the generated Mermaid code. Write your reasoning first then give the score based on these rules.
+
+SYNTAX SCORE RUBRIC
+5 Perfect. Valid Mermaid syntax with clear nodes and proper arrows.
+4 Good. Valid syntax but maybe a bit cluttered.
+3 Okay. Syntax is mostly fine but has a minor typo that might break one line.
+2 Bad. Syntax uses invalid characters for node IDs or broken shapes.
+1 Very bad. Not recognizable as Mermaid code.
+
+MAPPING SCORE RUBRIC
+5 Perfect. The graph maps all Nextflow processes and workflows exactly as written.
+4 Good. Maps the code well but maybe misses one small channel name.
+3 Okay. Captures the main idea but forgets several actual processes.
+2 Bad. Invents steps that do not exist in the Nextflow code or connects them completely wrong.
+1 Very bad. Completely ignores the Nextflow code.
+"""
+
+DIAGRAM_JUDGE_TEST_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", DIAGRAM_JUDGE_SYSTEM_STRING),
+    ("human", "Nextflow Code\n{nf_code}\n\nGenerated Mermaid Code\n{mermaid_code}")
 ])
 
 # ==========================================
@@ -88,7 +156,7 @@ def force_approve_consultant(agent, real_context, chat_history, max_attempts=3):
     pytest.fail(f"Agent stubbornly refused to approve after {max_attempts} attempts. Final status: {result.status} | AI said: {result.response_to_user}")
 
 def run_academic_judge(judge_llm, real_context, chat_history, ai_reply):
-    """Runs the LLM judge, prints the reasoning, and asserts strict scores."""
+    """Runs the LLM judge for the Consultant."""
     formatted_chat = "\n".join([f"{m.type.capitalize()}: {m.content}" for m in chat_history])
     evaluation = (JUDGE_TEST_PROMPT | judge_llm).invoke({
         "context": real_context,
@@ -99,14 +167,42 @@ def run_academic_judge(judge_llm, real_context, chat_history, ai_reply):
     print("\nFaithfulness " + str(evaluation.faithfulness_score) + " - " + evaluation.faithfulness_reason)
     print("Relevance " + str(evaluation.relevance_score) + " - " + evaluation.relevance_reason)
     
-    assert evaluation.faithfulness_score >= 4, "Faithfulness is too low."
-    assert evaluation.relevance_score >= 4, "Relevance is too low."
+    assert evaluation.faithfulness_score >= 4, f"Faithfulness score ({evaluation.faithfulness_score}) is too low. Reason: {evaluation.faithfulness_reason}"
+    assert evaluation.relevance_score >= 4, f"Relevance score ({evaluation.relevance_score}) is too low. Reason: {evaluation.relevance_reason}"
+
+def run_pipeline_judge(judge_llm, design_plan, tech_context, nf_code):
+    """Runs the LLM judge for the rendered Nextflow code."""
+    evaluation = (PIPELINE_JUDGE_TEST_PROMPT | judge_llm).invoke({
+        "plan": design_plan,
+        "context": tech_context,
+        "code": nf_code
+    })
+    
+    print("\nSyntax " + str(evaluation.syntax_score) + " - " + evaluation.syntax_reason)
+    print("Logic " + str(evaluation.logic_score) + " - " + evaluation.logic_reason)
+    
+    assert evaluation.syntax_score >= 4, f"Pipeline Syntax score ({evaluation.syntax_score}) is too low. Reason: {evaluation.syntax_reason}"
+    assert evaluation.logic_score >= 4, f"Pipeline Logic score ({evaluation.logic_score}) is too low. Reason: {evaluation.logic_reason}"
+
+def run_diagram_judge(judge_llm, nf_code, mermaid_code):
+    """Runs the LLM judge for the generated Mermaid diagram."""
+    evaluation = (DIAGRAM_JUDGE_TEST_PROMPT | judge_llm).invoke({
+        "nf_code": nf_code,
+        "mermaid_code": mermaid_code
+    })
+    
+    print("\nDiagram Syntax " + str(evaluation.syntax_score) + " - " + evaluation.syntax_reason)
+    print("Diagram Mapping " + str(evaluation.mapping_score) + " - " + evaluation.mapping_reason)
+    
+    assert evaluation.syntax_score >= 4, f"Diagram Syntax score ({evaluation.syntax_score}) is too low. Reason: {evaluation.syntax_reason}"
+    assert evaluation.mapping_score >= 4, f"Diagram Mapping score ({evaluation.mapping_score}) is too low. Reason: {evaluation.mapping_reason}"
 
 # ==========================================
-# ACTUAL TESTS
+# CONSULTANT TESTS
 # ==========================================
 
 def test_rag_retrieval_virologist_wnv():
+    """Tests the semantic retrieval capabilities of the RAG system to ensure correct pipelines are found."""
     query = "We have a large bird die-off in the area. I suspect it is West Nile. I need a pipeline to analyze the sequence data and figure out the exact viral lineage."
     context = retrieve_rag_context(query, store, embed_code=False)
     
@@ -119,7 +215,6 @@ def test_consultant_logic_and_quality_virologist_wnv():
     agent = llm.with_structured_output(ConsultantOutput)
     judge_llm = get_judge_llm(temperature=0.0).with_structured_output(AcademicEval)
     
-    # 1. Setup Exact Context & Scenario
     real_context = get_exact_context(["module_westnile"], ["step_4TY_lineage__westnile"], store)
     chat_history = [
         HumanMessage(content="We're dealing with a sudden cluster of dead crows and blue jays. We suspect a flavivirus, likely West Nile. I have paired-end Illumina reads. I need to figure out the exact viral lineage to trace the origin."),
@@ -129,12 +224,111 @@ def test_consultant_logic_and_quality_virologist_wnv():
         HumanMessage(content="Perfect. Yes, I completely approve the plan. I am ready to build.")
     ]
     
-    # 2. Run Consultant
     result = force_approve_consultant(agent, real_context, chat_history)
     
-    # 3. Assert Logic Outputs
+    # Detailed structural validations of the Consultant's output logic
+    assert result.status == "APPROVED", f"Logic Failed. Expected status 'APPROVED', got '{result.status}'"
+    assert result.strategy_selector == "EXACT_MATCH", f"Logic Failed. Expected strategy 'EXACT_MATCH', got '{result.strategy_selector}'"
     assert result.used_template_id == "module_westnile", f"Logic Failed. Expected 'module_westnile', got '{result.used_template_id}'"
-    assert "step_4TY_lineage__westnile" in result.selected_module_ids, "Logic Failed. Missing 'step_4TY_lineage__westnile' module."
+    assert "step_4TY_lineage__westnile" in result.selected_module_ids, "Logic Failed. Missing 'step_4TY_lineage__westnile' module in selected_module_ids."
+    
+    # Ensure there is comprehensive outputs generated for downstream agents and the user
+    assert result.draft_plan, "Logic Failed. 'draft_plan' cannot be empty when approved."
+    assert len(result.draft_plan) > 20, "Logic Failed. 'draft_plan' is not adequately detailed."
+    assert result.response_to_user, "Logic Failed. 'response_to_user' cannot be empty."
 
-    # 4. Run Judge Eval
     run_academic_judge(judge_llm, real_context, chat_history, result.response_to_user)
+
+
+# ==========================================
+# ARCHITECT TESTS
+# ==========================================
+
+@with_rate_limit_retry(max_attempts=3, delay_seconds=25)
+def test_execution_subgraph_westnile():
+    judge_llm = get_judge_llm(temperature=0.0).with_structured_output(ArchitectEval)
+    diagram_judge_llm = get_judge_llm(temperature=0.0).with_structured_output(DiagramEval)
+    
+    # 1. Build the mini graph with the diagram node
+    builder = StateGraph(GraphState)
+    builder.add_node("hydrator", hydrator_node)
+    builder.add_node("architect", architect_node)
+    builder.add_node("repair", repair_node)
+    builder.add_node("renderer", renderer_node)
+    builder.add_node("diagram", diagram_node)
+    
+    builder.set_entry_point("hydrator")
+    builder.add_edge("hydrator", "architect")
+    
+    builder.add_conditional_edges(
+        "architect", 
+        should_repair, 
+        {"success": "renderer", "repair": "repair", "fail": END}
+    )
+    
+    builder.add_edge("repair", "architect")
+    builder.add_edge("renderer", "diagram")
+    builder.add_edge("diagram", END)
+    
+    test_exec_graph = builder.compile(store=store)
+    
+    # 2. Mock State
+    initial_state = {
+        "user_query": "I have a large bird die-off. I need to figure out the exact viral lineage for West Nile.",
+        "consultant_status": "APPROVED",
+        "design_plan": "Execute the standard West Nile Virus surveillance pipeline.",
+        "strategy_selector": "EXACT_MATCH",
+        "used_template_id": "module_westnile",
+        "selected_module_ids": ["step_4TY_lineage__westnile"],
+        "retries": 0,
+        "messages": [
+            HumanMessage(content="I have a large bird die-off. I need to figure out the exact viral lineage for West Nile."),
+            AIMessage(content="I will build the West Nile Virus surveillance pipeline for you. Please approve."),
+            HumanMessage(content="I approve. Build it.")
+        ]
+    }
+    
+    # 3. Invoke the graph
+    config = {"configurable": {"thread_id": "test_execution_1"}}
+    final_state = test_exec_graph.invoke(initial_state, config=config)
+    
+    # 4. Assertions on the code and intermediary state transitions
+    assert final_state.get("validation_error") is None, f"Architect failed after {final_state.get('retries')} retries. Error: {final_state.get('validation_error')}"
+    
+    # Check that technical context was successfully injected by hydrator node
+    tech_context = final_state.get("technical_context")
+    assert tech_context is not None and len(tech_context) > 0, "Hydrator failed to assemble dynamic technical context."
+    assert "process " in tech_context or "workflow " in tech_context, "Technical context appears to lack actual Nextflow component definitions."
+
+    # Check that Architect node generated a valid AST representation of the code structure
+    ast_json = final_state.get("ast_json")
+    assert ast_json is not None, "Architect failed to generate the ast_json structure."
+    assert isinstance(ast_json, dict), "ast_json must be a parsed dictionary object."
+
+    # Check that Renderer successfully applied Jinja2 blocks over the validated AST
+    nf_code = final_state.get("nextflow_code")
+    assert nf_code is not None and len(nf_code) > 0, "Renderer generated completely empty Nextflow code."
+    assert "workflow {" in nf_code or "workflow " in nf_code, "Rendered code chunk appears to be missing a main workflow definition block."
+    
+    # Check Diagram rendering logic works correctly off the nf_code
+    mermaid_code = final_state.get("mermaid_code")
+    assert mermaid_code is not None and len(mermaid_code) > 0, "Diagram node emitted unexpectedly empty Mermaid code string."
+    assert "flowchart" in mermaid_code or "graph" in mermaid_code, "Diagram result string does not contain valid Mermaid diagram definitions."
+
+    # 5. LLM Judge Evaluation on the rendered code
+    print("\n--- Running Code Judge ---")
+    run_pipeline_judge(
+        judge_llm=judge_llm,
+        design_plan=final_state["design_plan"],
+        tech_context=final_state["technical_context"],
+        nf_code=nf_code
+    )
+    
+    # 6. LLM Judge Evaluation on the diagram
+    print("\n--- Running Diagram Judge ---")
+    run_diagram_judge(
+        judge_llm=diagram_judge_llm,
+        nf_code=nf_code,
+        mermaid_code=mermaid_code
+    )
+
