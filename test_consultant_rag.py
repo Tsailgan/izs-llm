@@ -82,7 +82,10 @@ JUDGE_TEST_PROMPT = ChatPromptTemplate.from_messages([
 PIPELINE_JUDGE_SYSTEM_STRING = """You are a senior Bioinformatics Software Engineer evaluating AI-generated Nextflow DSL2 code.
 The AI used the '{strategy}' strategy to build this.
 
-Read the Design Plan, the Technical Context, and the final Nextflow Code. Write your reasoning first then score based on these exact rules.
+CRITICAL INSTRUCTION. You are grading ONLY the code inside the <ai_generated_code_to_grade> tags. 
+The <reference_technical_context> is just the original blueprint. Do not grade the reference material.
+
+Read the Design Plan, the Technical Context, and the generated Nextflow Code. Write your reasoning first then score based on these exact rules.
 
 SYNTAX SCORE RUBRIC
 5 Perfect. Valid Nextflow DSL2 syntax with proper imports and correct channel emissions and valid workflow scopes.
@@ -101,11 +104,13 @@ LOGIC SCORE RUBRIC
 
 PIPELINE_JUDGE_TEST_PROMPT = ChatPromptTemplate.from_messages([
     ("system", PIPELINE_JUDGE_SYSTEM_STRING),
-    ("human", "Design Plan\n{plan}\n\nTechnical Context (Real Files)\n{context}\n\nFinal Nextflow Code\n{code}")
+    ("human", "<design_plan>\n{plan}\n</design_plan>\n\n<reference_technical_context>\n{context}\n</reference_technical_context>\n\n<ai_generated_code_to_grade>\n{code}\n</ai_generated_code_to_grade>")
 ])
 
 DIAGRAM_JUDGE_SYSTEM_STRING = """You are a strict code reviewer checking a Mermaid.js diagram.
 The pipeline was built using the '{strategy}' strategy.
+
+CRITICAL INSTRUCTION. You are grading ONLY the code inside the <ai_generated_mermaid_to_grade> tags.
 
 Read the Technical Context, the generated Nextflow code, and the generated Mermaid code. Write your reasoning first then give the score based on these rules.
 
@@ -126,7 +131,7 @@ MAPPING SCORE RUBRIC
 
 DIAGRAM_JUDGE_TEST_PROMPT = ChatPromptTemplate.from_messages([
     ("system", DIAGRAM_JUDGE_SYSTEM_STRING),
-    ("human", "Technical Context (Real Files)\n{context}\n\nNextflow Code\n{nf_code}\n\nGenerated Mermaid Code\n{mermaid_code}")
+    ("human", "<reference_technical_context>\n{context}\n</reference_technical_context>\n\n<reference_nextflow_code>\n{nf_code}\n</reference_nextflow_code>\n\n<ai_generated_mermaid_to_grade>\n{mermaid_code}\n</ai_generated_mermaid_to_grade>")
 ])
 
 # ==========================================
