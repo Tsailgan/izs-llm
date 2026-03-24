@@ -1,7 +1,7 @@
 import pytest
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.memory import InMemoryStore
+from langgraph.store.memory import InMemoryStore
 
 from app.services.tools import retrieve_rag_context
 from app.services.agents import CONSULTANT_SYSTEM_PROMPT
