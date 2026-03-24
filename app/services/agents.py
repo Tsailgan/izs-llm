@@ -325,11 +325,11 @@ def hydrator_node(state: GraphState, store: BaseStore):
             
             code_item = store.get(("code",), tmpl_id)
 
-            print("code_item", code_item)
+            # print("code_item", code_item)
 
             tmpl_code = code_item.value.get("content") if code_item else None
 
-            print("tmpl_code", tmpl_code)
+            # print("tmpl_code", tmpl_code)
             
             if tmpl_code:
                 context_parts.append(f"[[TEMPLATE SOURCE CODE: {tmpl_id}]]")
