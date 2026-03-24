@@ -14,10 +14,9 @@ from app.core.loader import data_loader
 from langgraph.graph import StateGraph, END
 from app.services.graph_state import GraphState
 
-from app.services.graph import hydrator_node, architect_node
+from app.services.graph import hydrator_node, architect_node, diagram_node
 from app.services.repair import repair_node, should_repair
 from app.services.renderer import renderer_node
-from app.services.graph import diagram_node
 
 store = InMemoryStore()
 
@@ -59,19 +58,19 @@ CONSULTANT_TEST_PROMPT = ChatPromptTemplate.from_messages([
 JUDGE_SYSTEM_STRING = """You are a very strict academic reviewer evaluating an AI system for bioinformatics. 
 Read the RAG context and the conversation. Write your reasoning first then give the score based on these exact rules.
 
-FAITHFULNESS SCORE RUBRIC:
-5: Perfect. The AI only uses the tools from the catalog and nothing else.
-4: Good. The AI uses the tools but maybe adds a tiny general fact that is not in the text.
-3: Okay. The AI uses the tools but talks a bit too much about outside tools.
-2: Bad. The AI tries to put a tool in the pipeline that is not in the catalog.
-1: Very bad. The AI completely makes up fake tools and fake pipeline names.
+FAITHFULNESS SCORE RUBRIC
+5 Perfect. The AI only uses the tools from the catalog and nothing else.
+4 Good. The AI uses the tools but maybe adds a tiny general fact that is not in the text.
+3 Okay. The AI uses the tools but talks a bit too much about outside tools.
+2 Bad. The AI tries to put a tool in the pipeline that is not in the catalog.
+1 Very bad. The AI completely makes up fake tools and fake pipeline names.
 
-RELEVANCE SCORE RUBRIC:
-5: Perfect. The AI gives the exact right pipeline and follows all rules like checking the data type.
-4: Good. The AI gives the right pipeline but maybe misses a very small preference from the user.
-3: Okay. The AI gives a pipeline but ignores a big rule (like using a short read tool for long read data).
-2: Bad. The AI picks the wrong template (like giving a bacteria pipeline when the user has a virus).
-1: Very bad. The AI completely ignores what the user asked for.
+RELEVANCE SCORE RUBRIC
+5 Perfect. The AI gives the exact right pipeline and follows all rules like checking the data type.
+4 Good. The AI gives the right pipeline but maybe misses a very small preference from the user.
+3 Okay. The AI gives a pipeline but ignores a big rule (like using a short read tool for long read data).
+2 Bad. The AI picks the wrong template (like giving a bacteria pipeline when the user has a virus).
+1 Very bad. The AI completely ignores what the user asked for.
 """
 
 JUDGE_TEST_PROMPT = ChatPromptTemplate.from_messages([
@@ -81,30 +80,34 @@ JUDGE_TEST_PROMPT = ChatPromptTemplate.from_messages([
 
 # Reusable Strict Judge Prompt for Architect
 PIPELINE_JUDGE_SYSTEM_STRING = """You are a senior Bioinformatics Software Engineer evaluating AI-generated Nextflow DSL2 code.
-Read the Design Plan, the injected Technical Context, and the final Nextflow Code. Write your reasoning first then score based on these exact rules.
+The AI used the '{strategy}' strategy to build this.
 
-SYNTAX SCORE RUBRIC (Nextflow DSL2):
-5: Perfect. Valid Nextflow DSL2 syntax, proper imports, correct channel emissions, and valid workflow scopes.
-4: Good. Valid syntax, but minor stylistic quirks (e.g., redundant channel mapping).
-3: Okay. Missing a minor output definition or slight channel mismatch.
-2: Bad. Major Nextflow syntax violations (e.g., passing channels incorrectly between workflows).
-1: Very bad. Not recognizable as valid Nextflow code.
+Read the Design Plan, the Technical Context, and the final Nextflow Code. Write your reasoning first then score based on these exact rules.
 
-LOGIC SCORE RUBRIC (Adherence to Plan):
-5: Perfect. The code exactly implements the requested modules and template logic from the Design Plan.
-4: Good. Implements the plan but misses a minor tool option or parameter.
-3: Okay. Implements the core plan but forgets a requested module or adds an unrequested one.
-2: Bad. Re-invents the pipeline, largely ignoring the specific template logic provided.
-1: Very bad. Completely fails to implement the Design Plan.
+SYNTAX SCORE RUBRIC
+5 Perfect. Valid Nextflow DSL2 syntax with proper imports and correct channel emissions and valid workflow scopes.
+4 Good. Valid syntax but has minor stylistic quirks.
+3 Okay. Missing a minor output definition or slight channel mismatch.
+2 Bad. Major Nextflow syntax violations.
+1 Very bad. Not recognizable as valid Nextflow code.
+
+LOGIC SCORE RUBRIC
+5 Perfect. If EXACT_MATCH or ADAPTED_MATCH, it rigorously follows the template logic. If CUSTOM_BUILD, it stitches the requested components together logically from scratch.
+4 Good. Implements the plan but misses a minor tool option or parameter from the original context.
+3 Okay. Implements the core plan but forgets a requested module or deviates slightly from the provided blueprints.
+2 Bad. Re-invents the pipeline and largely ignores the specific template logic provided in the Technical Context.
+1 Very bad. Completely fails to implement the Design Plan and ignores the context entirely.
 """
 
 PIPELINE_JUDGE_TEST_PROMPT = ChatPromptTemplate.from_messages([
     ("system", PIPELINE_JUDGE_SYSTEM_STRING),
-    ("human", "Design Plan\n{plan}\n\nTechnical Context\n{context}\n\nFinal Nextflow Code\n{code}")
+    ("human", "Design Plan\n{plan}\n\nTechnical Context (Real Files)\n{context}\n\nFinal Nextflow Code\n{code}")
 ])
 
 DIAGRAM_JUDGE_SYSTEM_STRING = """You are a strict code reviewer checking a Mermaid.js diagram.
-Read the Nextflow code and the generated Mermaid code. Write your reasoning first then give the score based on these rules.
+The pipeline was built using the '{strategy}' strategy.
+
+Read the Technical Context, the generated Nextflow code, and the generated Mermaid code. Write your reasoning first then give the score based on these rules.
 
 SYNTAX SCORE RUBRIC
 5 Perfect. Valid Mermaid syntax with clear nodes and proper arrows.
@@ -114,16 +117,16 @@ SYNTAX SCORE RUBRIC
 1 Very bad. Not recognizable as Mermaid code.
 
 MAPPING SCORE RUBRIC
-5 Perfect. The graph maps all Nextflow processes and workflows exactly as written.
+5 Perfect. The graph maps all Nextflow processes from the code and matches the intent of the original Technical Context.
 4 Good. Maps the code well but maybe misses one small channel name.
 3 Okay. Captures the main idea but forgets several actual processes.
 2 Bad. Invents steps that do not exist in the Nextflow code or connects them completely wrong.
-1 Very bad. Completely ignores the Nextflow code.
+1 Very bad. Completely ignores the Nextflow code and original context.
 """
 
 DIAGRAM_JUDGE_TEST_PROMPT = ChatPromptTemplate.from_messages([
     ("system", DIAGRAM_JUDGE_SYSTEM_STRING),
-    ("human", "Nextflow Code\n{nf_code}\n\nGenerated Mermaid Code\n{mermaid_code}")
+    ("human", "Technical Context (Real Files)\n{context}\n\nNextflow Code\n{nf_code}\n\nGenerated Mermaid Code\n{mermaid_code}")
 ])
 
 # ==========================================
@@ -147,7 +150,7 @@ def force_approve_consultant(agent, real_context, chat_history, max_attempts=3):
         result = chain.invoke({"context": real_context, "messages": chat_history})
         
         if result.status == "APPROVED":
-            return result # Success
+            return result
             
         print(f"\n[Attempt {attempt+1}] Agent returned status '{result.status}'. Nudging for approval...")
         chat_history.append(AIMessage(content=result.response_to_user))
@@ -167,12 +170,13 @@ def run_academic_judge(judge_llm, real_context, chat_history, ai_reply):
     print("\nFaithfulness " + str(evaluation.faithfulness_score) + " - " + evaluation.faithfulness_reason)
     print("Relevance " + str(evaluation.relevance_score) + " - " + evaluation.relevance_reason)
     
-    assert evaluation.faithfulness_score >= 4, f"Faithfulness score ({evaluation.faithfulness_score}) is too low. Reason: {evaluation.faithfulness_reason}"
-    assert evaluation.relevance_score >= 4, f"Relevance score ({evaluation.relevance_score}) is too low. Reason: {evaluation.relevance_reason}"
+    assert evaluation.faithfulness_score >= 4, f"Faithfulness score ({evaluation.faithfulness_score}) is too low. Reason {evaluation.faithfulness_reason}"
+    assert evaluation.relevance_score >= 4, f"Relevance score ({evaluation.relevance_score}) is too low. Reason {evaluation.relevance_reason}"
 
-def run_pipeline_judge(judge_llm, design_plan, tech_context, nf_code):
+def run_pipeline_judge(judge_llm, design_plan, tech_context, nf_code, strategy):
     """Runs the LLM judge for the rendered Nextflow code."""
     evaluation = (PIPELINE_JUDGE_TEST_PROMPT | judge_llm).invoke({
+        "strategy": strategy,
         "plan": design_plan,
         "context": tech_context,
         "code": nf_code
@@ -181,12 +185,14 @@ def run_pipeline_judge(judge_llm, design_plan, tech_context, nf_code):
     print("\nSyntax " + str(evaluation.syntax_score) + " - " + evaluation.syntax_reason)
     print("Logic " + str(evaluation.logic_score) + " - " + evaluation.logic_reason)
     
-    assert evaluation.syntax_score >= 4, f"Pipeline Syntax score ({evaluation.syntax_score}) is too low. Reason: {evaluation.syntax_reason}"
-    assert evaluation.logic_score >= 4, f"Pipeline Logic score ({evaluation.logic_score}) is too low. Reason: {evaluation.logic_reason}"
+    assert evaluation.syntax_score >= 4, f"Pipeline Syntax score ({evaluation.syntax_score}) is too low. Reason {evaluation.syntax_reason}"
+    assert evaluation.logic_score >= 4, f"Pipeline Logic score ({evaluation.logic_score}) is too low. Reason {evaluation.logic_reason}"
 
-def run_diagram_judge(judge_llm, nf_code, mermaid_code):
+def run_diagram_judge(judge_llm, tech_context, nf_code, mermaid_code, strategy):
     """Runs the LLM judge for the generated Mermaid diagram."""
     evaluation = (DIAGRAM_JUDGE_TEST_PROMPT | judge_llm).invoke({
+        "strategy": strategy,
+        "context": tech_context,
         "nf_code": nf_code,
         "mermaid_code": mermaid_code
     })
@@ -194,8 +200,8 @@ def run_diagram_judge(judge_llm, nf_code, mermaid_code):
     print("\nDiagram Syntax " + str(evaluation.syntax_score) + " - " + evaluation.syntax_reason)
     print("Diagram Mapping " + str(evaluation.mapping_score) + " - " + evaluation.mapping_reason)
     
-    assert evaluation.syntax_score >= 4, f"Diagram Syntax score ({evaluation.syntax_score}) is too low. Reason: {evaluation.syntax_reason}"
-    assert evaluation.mapping_score >= 4, f"Diagram Mapping score ({evaluation.mapping_score}) is too low. Reason: {evaluation.mapping_reason}"
+    assert evaluation.syntax_score >= 4, f"Diagram Syntax score ({evaluation.syntax_score}) is too low. Reason {evaluation.syntax_reason}"
+    assert evaluation.mapping_score >= 4, f"Diagram Mapping score ({evaluation.mapping_score}) is too low. Reason {evaluation.mapping_reason}"
 
 # ==========================================
 # CONSULTANT TESTS
@@ -225,13 +231,11 @@ def test_consultant_logic_and_quality_virologist_wnv():
     
     result = force_approve_consultant(agent, real_context, chat_history)
     
-    # Detailed structural validations of the Consultant's output logic
     assert result.status == "APPROVED", f"Logic Failed. Expected status 'APPROVED', got '{result.status}'"
     assert result.strategy_selector == "EXACT_MATCH", f"Logic Failed. Expected strategy 'EXACT_MATCH', got '{result.strategy_selector}'"
     assert result.used_template_id == "module_westnile", f"Logic Failed. Expected 'module_westnile', got '{result.used_template_id}'"
     assert "step_4TY_lineage__westnile" in result.selected_module_ids, "Logic Failed. Missing 'step_4TY_lineage__westnile' module in selected_module_ids."
     
-    # Ensure there is comprehensive outputs generated for downstream agents and the user
     assert result.draft_plan, "Logic Failed. 'draft_plan' cannot be empty when approved."
     assert len(result.draft_plan) > 20, "Logic Failed. 'draft_plan' is not adequately detailed."
     assert result.response_to_user, "Logic Failed. 'response_to_user' cannot be empty."
@@ -248,7 +252,6 @@ def test_execution_subgraph_westnile():
     judge_llm = get_judge_llm(temperature=0.0).with_structured_output(ArchitectEval)
     diagram_judge_llm = get_judge_llm(temperature=0.0).with_structured_output(DiagramEval)
     
-    # 1. Build the mini graph with the diagram node
     builder = StateGraph(GraphState)
     builder.add_node("hydrator", hydrator_node)
     builder.add_node("architect", architect_node)
@@ -258,20 +261,13 @@ def test_execution_subgraph_westnile():
     
     builder.set_entry_point("hydrator")
     builder.add_edge("hydrator", "architect")
-    
-    builder.add_conditional_edges(
-        "architect", 
-        should_repair, 
-        {"success": "renderer", "repair": "repair", "fail": END}
-    )
-    
+    builder.add_conditional_edges("architect", should_repair, {"success": "renderer", "repair": "repair", "fail": END})
     builder.add_edge("repair", "architect")
     builder.add_edge("renderer", "diagram")
     builder.add_edge("diagram", END)
     
     test_exec_graph = builder.compile(store=store)
     
-    # 2. Mock State
     initial_state = {
         "user_query": "I have a large bird die-off. I need to figure out the exact viral lineage for West Nile.",
         "consultant_status": "APPROVED",
@@ -287,47 +283,31 @@ def test_execution_subgraph_westnile():
         ]
     }
     
-    # 3. Invoke the graph
     config = {"configurable": {"thread_id": "test_execution_1"}}
     final_state = test_exec_graph.invoke(initial_state, config=config)
     
-    # 4. Assertions on the code and intermediary state transitions
-    assert final_state.get("validation_error") is None, f"Architect failed after {final_state.get('retries')} retries. Error: {final_state.get('validation_error')}"
+    assert final_state.get("validation_error") is None, f"Architect failed after {final_state.get('retries')} retries. Error {final_state.get('validation_error')}"
     
-    # Check that technical context was successfully injected by hydrator node
     tech_context = final_state.get("technical_context")
     assert tech_context is not None and len(tech_context) > 0, "Hydrator failed to assemble dynamic technical context."
     assert "process " in tech_context or "workflow " in tech_context, "Technical context appears to lack actual Nextflow component definitions."
 
-    # Check that Architect node generated a valid AST representation of the code structure
     ast_json = final_state.get("ast_json")
     assert ast_json is not None, "Architect failed to generate the ast_json structure."
     assert isinstance(ast_json, dict), "ast_json must be a parsed dictionary object."
 
-    # Check that Renderer successfully applied Jinja2 blocks over the validated AST
     nf_code = final_state.get("nextflow_code")
     assert nf_code is not None and len(nf_code) > 0, "Renderer generated completely empty Nextflow code."
     assert "workflow {" in nf_code or "workflow " in nf_code, "Rendered code chunk appears to be missing a main workflow definition block."
     
-    # Check Diagram rendering logic works correctly off the nf_code
     mermaid_code = final_state.get("mermaid_code")
     assert mermaid_code is not None and len(mermaid_code) > 0, "Diagram node emitted unexpectedly empty Mermaid code string."
     assert "flowchart" in mermaid_code or "graph" in mermaid_code, "Diagram result string does not contain valid Mermaid diagram definitions."
 
-    # 5. LLM Judge Evaluation on the rendered code
-    print("\n--- Running Code Judge ---")
-    run_pipeline_judge(
-        judge_llm=judge_llm,
-        design_plan=final_state["design_plan"],
-        tech_context=final_state["technical_context"],
-        nf_code=nf_code
-    )
-    
-    # 6. LLM Judge Evaluation on the diagram
-    print("\n--- Running Diagram Judge ---")
-    run_diagram_judge(
-        judge_llm=diagram_judge_llm,
-        nf_code=nf_code,
-        mermaid_code=mermaid_code
-    )
+    strategy = final_state.get("strategy_selector")
 
+    print("\n--- Running Code Judge ---")
+    run_pipeline_judge(judge_llm, final_state["design_plan"], tech_context, nf_code, strategy)
+    
+    print("\n--- Running Diagram Judge ---")
+    run_diagram_judge(diagram_judge_llm, tech_context, nf_code, mermaid_code, strategy)
