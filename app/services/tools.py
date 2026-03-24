@@ -55,7 +55,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
     
     docs = data_loader.vector_store.similarity_search(user_query, k=15)
 
-    print(docs)
+    # print(docs)
 
     found_ids = set()
     context_blocks = []
