@@ -62,7 +62,9 @@ def render_mermaid_from_json(data) -> str:
 
     for sg_name, nodes in subgraphs.items():
         clean_sg = sg_name.replace(" ", "_").replace(".", "_")
-        lines.append(f"    subgraph {clean_sg}")
+        
+        lines.append(f'    subgraph sg_{clean_sg} ["{sg_name}"]')
+        
         for n in nodes:
             lines.append(draw_node(n))
         lines.append("    end")

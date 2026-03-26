@@ -106,25 +106,13 @@ class WorkflowBlock(BaseModel):
 
 class Entrypoint(BaseModel):
     body_code: str = Field(
-        description="The code inside the main unnamed workflow. Do not write 'workflow {{ }}'."
+        description="The code inside the main unnamed workflow. Do not write 'workflow { }'."
     )
 
     @field_validator('body_code')
     def forbid_workflow_wrapper(cls, v):
         if re.search(r'^\s*workflow\s*\{', v):
-            raise ValueError("FORMAT ERROR: DO NOT wrap the entrypoint body_code in 'workflow {{ ... }}'.")
-        return v
-
-    @field_validator('body_code')
-    def forbid_complex_logic(cls, v):
-        """Keep the entrypoint clean."""
-        forbidden = ['.cross', '.multiMap', '.map', '.branch', '.mix', '.join']
-        for kw in forbidden:
-            if kw in v:
-                raise ValueError(
-                    f"ARCHITECTURE ERROR: Entrypoint contains complex logic '{kw}'. "
-                    f"Move this logic into the main_workflow and just call the main_workflow here."
-                )
+            raise ValueError("FORMAT ERROR: DO NOT wrap the entrypoint body_code in 'workflow { ... }'.")
         return v
 
 class NextflowPipelineAST(BaseModel):
@@ -132,7 +120,6 @@ class NextflowPipelineAST(BaseModel):
     globals: List[GlobalDef] = []
     inline_processes: List[InlineProcess] = []
     sub_workflows: List[WorkflowBlock] = []
-    main_workflow: WorkflowBlock
     entrypoint: Entrypoint
 
     @model_validator(mode='after')
@@ -150,7 +137,6 @@ class NextflowPipelineAST(BaseModel):
         """If a step_ or multi_ tool is used in the body, it MUST be imported."""
         allowed_callables = set()
         
-        # 1. Collect everything that is officially defined
         for imp in self.imports:
             for func in imp.functions:
                 alias = func.split(' as ')[-1].strip()
@@ -159,14 +145,11 @@ class NextflowPipelineAST(BaseModel):
             allowed_callables.add(p.name)
         for sw in self.sub_workflows:
             allowed_callables.add(sw.name)
-        allowed_callables.add(self.main_workflow.name)
 
-        # 2. Mash all code together to scan it
-        all_code = self.main_workflow.body_code + "\n" + self.entrypoint.body_code
+        all_code = self.entrypoint.body_code
         for sw in self.sub_workflows:
             all_code += "\n" + sw.body_code
 
-        # 3. Look for any standard tool calls like `step_alignment_bwa(...)`
         pattern = re.compile(r'\b((?:step_|multi_|module_|prepare_)[a-zA-Z0-9_]+)\s*\(')
         for match in pattern.finditer(all_code):
             func_name = match.group(1)
@@ -180,15 +163,12 @@ class NextflowPipelineAST(BaseModel):
     @model_validator(mode='after')
     def enforce_workflow_usage(self):
         """If you define a sub_workflow, you must actually use it."""
-        all_code = self.main_workflow.body_code + "\n" + self.entrypoint.body_code
-        for sw in self.sub_workflows:
-            all_code += "\n" + sw.body_code
-
+        all_code = self.entrypoint.body_code
         for sw in self.sub_workflows:
             pattern = rf"\b{sw.name}\b\s*\("
             if not re.search(pattern, all_code):
                 raise ValueError(
                     f"VALIDATION ERROR: The sub_workflow '{sw.name}' is defined but NEVER CALLED in the pipeline. "
-                    f"Either call it in the main workflow or remove it."
+                    f"Either call it in the entrypoint workflow or remove it."
                 )
         return self
