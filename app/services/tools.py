@@ -17,7 +17,7 @@ def _inject_component(comp_id, found_ids, context_blocks, store: BaseStore, embe
     code_item = store.get(("code",), comp_id)
     code_snippet = code_item.value.get("content", "// Code not found") if code_item else "// Code not found in repository"
 
-block = f"""
+    block = f"""
 --- COMPONENT: {comp_id} ---
 TOOL: {comp_data.get('tool', 'Unknown')}
 DESCRIPTION: {comp_data.get('description', 'No description')}
