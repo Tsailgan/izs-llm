@@ -53,24 +53,6 @@ workflow {{ sw.name }} {
 }
 {% endfor %}
 
-// --- MAIN WORKFLOW ---
-workflow {{ main_workflow.name }} {
-    {% if main_workflow.take_channels %}
-    take:
-        {% for ch in main_workflow.take_channels %}
-        {{ ch }}
-        {% endfor %}
-    {% endif %}
-    main:
-{{ main_workflow.body_code | indent(8, true) }}
-    {% if main_workflow.emit_channels %}
-    emit:
-        {% for em in main_workflow.emit_channels %}
-        {{ em }}
-        {% endfor %}
-    {% endif %}
-}
-
 // --- ENTRYPOINT ---
 workflow {
 {{ entrypoint.body_code | indent(4, true) }}
