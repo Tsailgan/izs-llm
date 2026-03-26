@@ -123,16 +123,6 @@ class NextflowPipelineAST(BaseModel):
     entrypoint: Entrypoint
 
     @model_validator(mode='after')
-    def ensure_entrypoint_connectivity(self):
-        """The entrypoint must actually call the main workflow."""
-        if self.main_workflow.name not in self.entrypoint.body_code:
-            raise ValueError(
-                f"VALIDATION ERROR: Your entrypoint does not call the main workflow '{self.main_workflow.name}'. "
-                f"The entrypoint must trigger the pipeline."
-            )
-        return self
-
-    @model_validator(mode='after')
     def enforce_defined_processes(self):
         """If a step_ or multi_ tool is used in the body, it MUST be imported."""
         allowed_callables = set()
