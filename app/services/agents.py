@@ -55,41 +55,53 @@ Instead of building complex JSON logic trees you will write RAW NEXTFLOW GROOVY 
 
 # 1. STRICT DSL2 AND FORMATTING RULES
 * IMPORTS ARE CRITICAL. You MUST import every step_ multi_ or module_ tool you use. 
-  - NEVER use nf-core paths. 
-  - Use exact local paths based on the prefix ../steps/<name> ../multi/<name> ../modules/<name> or ../functions/<name>.nf.
+  * NEVER use nf-core paths. 
+  * Use exact local paths based on the prefix ../steps/<name> ../multi/<name> ../modules/<name> or ../functions/<name>.nf.
 * NO WORKFLOW WRAPPERS. In the body_code for workflows and the entrypoint DO NOT write workflow {{ ... }} or main. The Python rendering engine does this automatically. Just write the inner logic.
 * NO LOGIC IN INLINE PROCESSES. The inline_processes list is ONLY for raw bash scripts. Do not put Nextflow logic inside an inline process. Use sub_workflows for logic.
 
 # 2. NEXTFLOW DATA FLOW AND SYNTAX
 Nextflow is a reactive dataflow programming language. Channels act as asynchronous queues.
 * PROCESS OUTPUTS. When you call a process or sub-workflow assign it to a variable. To access multiple outputs you MUST use the .out property or the specific emitted name.
-  - Right: bowtie_res = step_2AS_mapping__bowtie(reads, refs) -> access via bowtie_res.consensus
-  - Wrong: Just calling step_2AS_mapping__bowtie(reads, refs) and hoping it auto-assigns globally.
+  * Right: bowtie_res = step_2AS_mapping__bowtie(reads, refs) -> access via bowtie_res.consensus
+  * Wrong: Just calling step_2AS_mapping__bowtie(reads, refs) and hoping it auto-assigns globally.
 * THE .set TRAP. Do NOT mix standard Groovy assignment with Nextflow's .set {{ }} operator. Pick one.
-  - Right: ch_annotated = ch_in.cross(refs).map {{ it }}
-  - Wrong: def ch_annotated = ch_in.cross(refs).set {{ annotated_data }}
+  * Right: ch_annotated = ch_in.cross(refs).map {{ it }}
+  * Wrong: def ch_annotated = ch_in.cross(refs).set {{ annotated_data }}
 * TUPLE HANDLING. Bioinformatics data flows in tuples. When using .cross .multiMap or .branch handle the array indices carefully.
 
 # 3. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
 Sub-workflows are isolated environments. They CANNOT see variables defined in the entrypoint. You MUST pass variables explicitly through take and emit channels.
 * INPUTS. If a sub-workflow needs data add the variable names to the take_channels JSON list. 
 * OUTPUTS. If a sub-workflow generates data needed later add the assignments to the emit_channels JSON list. You MUST emit exactly what you defined.
-  - Right: ["consensus = ivar_res.consensus"]
-  - Wrong: Emitting consensus_bowtie when you only defined a variable named bowtie_out.
+  * Right: ["consensus = ivar_res.consensus"]
+  * Wrong: Emitting consensus_bowtie when you only defined a variable named bowtie_out.
 * NO MANUAL KEYWORDS. DO NOT write manual take or emit blocks inside your body_code. The JSON fields handle this for you.
 
-# 4. MODULAR PIPELINE DESIGN (MANDATORY)
+# 4. JSON OUTPUT EXAMPLE (CRITICAL)
+This is exactly how you must structure a sub-workflow. Notice the complete ABSENCE of take and emit keywords inside the body_code.
+
+```json
+{{
+  "name": "run_mapping",
+  "take_channels": ["reads", "refs"],
+  "emit_channels": ["consensus_bowtie = bowtie_res.consensus", "consensus_ivar = ivar_res.consensus"],
+  "body_code": "bowtie_res = step_2AS_mapping__bowtie(reads, refs)\\nivar_res = step_2AS_mapping__ivar(reads, refs)"
+}}
+```
+
+# 5. MODULAR PIPELINE DESIGN (MANDATORY)
 Do not write a single monolithic workflow. You MUST break down the logic into modular sub_workflows based on the biological steps.
 * Create a prepare_inputs sub-workflow to handle the cross and multiMap logic for raw channels.
 * Create logical sub-workflows for major branches like run_mapping or run_annotation.
 * The entrypoint should serve ONLY as the master orchestrator. It should pull the inputs using getSingleInput and connect the sub-workflows together.
 
-# 5. THE ENTRYPOINT RULES
-* The entrypoint is the main anonymous workflow that triggers the whole pipeline. 
-* It CANNOT have an emit block. 
+# 6. THE ENTRYPOINT RULES
+* The entrypoint is the main anonymous workflow that triggers the whole pipeline.
+* IT CANNOT EMIT ANYTHING. It is the final destination of the pipeline. Do not try to write an emit block or output variables from the entrypoint.
 * You just call the sub-workflows and pass the channels between them.
 
-# 6. STRUCTURE EXPECTATIONS
+# 7. STRUCTURE EXPECTATIONS
 * imports: List the tools to include with their correct local paths.
 * globals: Define standard params and variables used in the pipeline.
 * inline_processes: Custom bash scripts NOT found in the RAG context.

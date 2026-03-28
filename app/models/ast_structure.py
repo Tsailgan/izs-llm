@@ -60,7 +60,7 @@ class InlineProcess(BaseModel):
     @field_validator('script_block')
     def validate_no_dsl(cls, v):
         """Forbid DSL2 logic inside bash scripts."""
-        forbidden = ['workflow', '.cross(', '.join(', '.multiMap', '.map{{', '.mix(']
+        forbidden = ['workflow', '.cross(', '.join(', '.multiMap', '.map{', '.mix(']
         for kw in forbidden:
             if kw in v:
                 raise ValueError(
@@ -81,58 +81,80 @@ class InlineProcess(BaseModel):
 class WorkflowBlock(BaseModel):
     name: str = Field(description="The name of the workflow.")
     take_channels: List[str] = Field(default=[], description="List of input channel names.")
-    emit_channels: List[str] = Field(default=[], description="List of output channel names (e.g., 'reads = ch_prepared.reads').")
+    emit_channels: List[str] = Field(default=[], description="List of output channel names.")
     body_code: str = Field(
-        description="The raw Groovy logic. DO NOT write 'workflow {{ }}', 'take:', or 'emit:' wrappers here."
+        description="The raw Groovy logic. DO NOT write 'workflow { }', 'take:', or 'emit:' wrappers here."
     )
 
-    @field_validator('body_code')
-    def forbid_workflow_wrapper(cls, v):
-        if re.search(r'^\s*workflow\s+[_a-zA-Z0-9]*\s*\{', v) or re.search(r'^\s*workflow\s*\{', v) or 'main:' in v:
-            raise ValueError(
-                "FORMAT ERROR: DO NOT wrap the body_code in 'workflow {{ ... }}' or 'main:'. "
-                "The rendering engine does this automatically. Only write the actual steps and operators inside the body."
-            )
-        return v
+    @field_validator('body_code', mode='before')
+    def auto_heal_body_code(cls, v):
+        if not isinstance(v, str): return v
         
-    @field_validator('body_code')
-    def forbid_manual_take_emit(cls, v):
-        """Forces the LLM to use the JSON arrays instead of hardcoding take/emit blocks."""
-        if re.search(r'^\s*take:', v, re.MULTILINE) or re.search(r'^\s*emit:', v, re.MULTILINE):
-            raise ValueError(
-                "SCOPE ERROR: DO NOT write 'take:' or 'emit:' blocks inside body_code. "
-                "You MUST put your inputs in the `take_channels` JSON list and outputs in the `emit_channels` JSON list."
-            )
-        return v
+        match = re.search(r'^\s*workflow\s+[_a-zA-Z0-9]*\s*\{(.*)\}\s*$', v, re.DOTALL)
+        if match: v = match.group(1)
+
+        v = re.sub(r'^\s*take:.*?(?=^\s*main:|^\s*emit:|\Z)', '', v, flags=re.MULTILINE | re.DOTALL)
+        v = re.sub(r'^\s*emit:[\s\S]*', '', v, flags=re.MULTILINE)
+        v = re.sub(r'^\s*main:\s*', '', v, flags=re.MULTILINE)
+
+        return v.strip()
 
     @model_validator(mode='after')
     def forbid_recursion(self):
-        """Prevent workflows from calling themselves."""
         if self.name and self.body_code:
             pattern = rf"\b{self.name}\b\s*\("
             if re.search(pattern, self.body_code):
                 raise ValueError(f"RECURSION ERROR: Workflow '{self.name}' is trying to call itself. This is forbidden.")
         return self
 
+    @model_validator(mode='after')
+    def enforce_variable_existence(self):
+        """Ensures that any variable emitted actually exists in the take_channels or body_code."""
+        if not self.body_code:
+            return self
+            
+        valid_vars = set(self.take_channels)
+        
+        assignments = re.findall(r'^[\s]*(?:def\s+)?([a-zA-Z0-9_]+)\s*=', self.body_code, re.MULTILINE)
+        valid_vars.update(assignments)
+        
+        sets = re.findall(r'\.set\s*\{\s*([a-zA-Z0-9_]+)\s*\}', self.body_code)
+        valid_vars.update(sets)
+
+        for emit_str in self.emit_channels:
+            rhs = emit_str.split('=')[-1].strip()
+            
+            base_var = re.split(r'[\.\[]', rhs)[0].strip()
+            
+            if not base_var or base_var.startswith("'") or base_var.startswith('"') or base_var in ['true', 'false', 'null']:
+                continue
+                
+            if base_var not in valid_vars:
+                raise ValueError(
+                    f"HALLUCINATION DETECTED in workflow '{self.name}'. "
+                    f"You are trying to emit '{emit_str}' but the variable '{base_var}' "
+                    f"was NEVER DEFINED. It is not in your take_channels and you did not assign it in the body_code."
+                )
+        return self
+
 class Entrypoint(BaseModel):
     body_code: str = Field(
-        description="The code inside the main unnamed workflow. Do not write 'workflow {{ }}'."
+        description="The code inside the main unnamed workflow. Do not write 'workflow { }'."
     )
 
-    @field_validator('body_code')
-    def forbid_workflow_wrapper(cls, v):
-        if re.search(r'^\s*workflow\s*\{', v):
-            raise ValueError("FORMAT ERROR: DO NOT wrap the entrypoint body_code in 'workflow {{ ... }}'.")
-        return v
+    @field_validator('body_code', mode='before')
+    def auto_heal_entrypoint(cls, v):
+        """Silently cleans up the entrypoint logic."""
+        if not isinstance(v, str): return v
 
-    @field_validator('body_code')
-    def forbid_emit_in_entrypoint(cls, v):
-        if re.search(r'^\s*emit:', v, re.MULTILINE):
-            raise ValueError(
-                "SYNTAX ERROR: The main anonymous entrypoint `workflow {{ ... }}` CANNOT have an 'emit:' block. "
-                "Just call your sub-workflows and processes. Remove the emit block."
-            )
-        return v
+        match = re.search(r'^\s*workflow\s*\{(.*)\}\s*$', v, re.DOTALL)
+        if match: v = match.group(1)
+
+        v = re.sub(r'^\s*main:\s*', '', v, flags=re.MULTILINE)
+
+        v = re.sub(r'^\s*emit:[\s\S]*', '', v, flags=re.MULTILINE)
+
+        return v.strip()
 
 class NextflowPipelineAST(BaseModel):
     imports: List[ImportItem] = []
