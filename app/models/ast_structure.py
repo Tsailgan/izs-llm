@@ -82,22 +82,33 @@ class WorkflowBlock(BaseModel):
     name: str = Field(description="The name of the workflow.")
     take_channels: List[str] = Field(default=[], description="List of input channel names.")
     emit_channels: List[str] = Field(default=[], description="List of output channel names.")
-    body_code: str = Field(
-        description="The raw Groovy logic. DO NOT write 'workflow { }', 'take:', or 'emit:' wrappers here."
-    )
+    body_code: str = Field(description="The raw Groovy logic.")
 
-    @field_validator('body_code', mode='before')
-    def auto_heal_body_code(cls, v):
-        if not isinstance(v, str): return v
+    @model_validator(mode='before')
+    @classmethod
+    def rescue_and_heal_body(cls, data: dict) -> dict:
+        """Rescues assignments from hallucinated emit blocks before stripping them."""
+        if not isinstance(data, dict): return data
         
-        match = re.search(r'^\s*workflow\s+[_a-zA-Z0-9]*\s*\{(.*)\}\s*$', v, re.DOTALL)
-        if match: v = match.group(1)
+        body = data.get('body_code', '')
+        if not isinstance(body, str): return data
+        
+        emit_match = re.search(r'^\s*emit:\s*([\s\S]*)$', body, flags=re.MULTILINE)
+        if emit_match:
+            emit_block = emit_match.group(1)
+            assignments = re.findall(r'([a-zA-Z0-9_]+)\s*=\s*([a-zA-Z0-9_.\-\[\]]+)', emit_block)
+            if assignments:
+                data['emit_channels'] = [f"{k} = {v}" for k, v in assignments]
 
-        v = re.sub(r'^\s*take:.*?(?=^\s*main:|^\s*emit:|\Z)', '', v, flags=re.MULTILINE | re.DOTALL)
-        v = re.sub(r'^\s*emit:[\s\S]*', '', v, flags=re.MULTILINE)
-        v = re.sub(r'^\s*main:\s*', '', v, flags=re.MULTILINE)
+        match = re.search(r'^\s*workflow\s+[_a-zA-Z0-9]*\s*\{(.*)\}\s*$', body, re.DOTALL)
+        if match: body = match.group(1)
 
-        return v.strip()
+        body = re.sub(r'^\s*take:.*?(?=^\s*main:|^\s*emit:|\Z)', '', body, flags=re.MULTILINE | re.DOTALL)
+        body = re.sub(r'^\s*emit:[\s\S]*', '', body, flags=re.MULTILINE)
+        body = re.sub(r'^\s*main:\s*', '', body, flags=re.MULTILINE)
+
+        data['body_code'] = body.strip()
+        return data
 
     @model_validator(mode='after')
     def forbid_recursion(self):
@@ -114,10 +125,10 @@ class WorkflowBlock(BaseModel):
             return self
             
         valid_vars = set(self.take_channels)
-        
+
         assignments = re.findall(r'^[\s]*(?:def\s+)?([a-zA-Z0-9_]+)\s*=', self.body_code, re.MULTILINE)
         valid_vars.update(assignments)
-        
+      
         sets = re.findall(r'\.set\s*\{\s*([a-zA-Z0-9_]+)\s*\}', self.body_code)
         valid_vars.update(sets)
 

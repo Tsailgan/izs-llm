@@ -77,6 +77,7 @@ Sub-workflows are isolated environments. They CANNOT see variables defined in th
   * Right: ["consensus = ivar_res.consensus"]
   * Wrong: Emitting consensus_bowtie when you only defined a variable named bowtie_out.
 * NO MANUAL KEYWORDS. DO NOT write manual take or emit blocks inside your body_code. The JSON fields handle this for you.
+* EMITTING MODIFIED CHANNELS. If you use operators like cross or map and save the result to a new variable like prepared_data you MUST emit that new variable. Do not emit the raw input channel. For example use ["reads = prepared_data.reads", "refs = prepared_data.refs"] in your emit_channels.
 
 # 4. JSON OUTPUT EXAMPLE (CRITICAL)
 This is exactly how you must structure a sub-workflow. Notice the complete ABSENCE of take and emit keywords inside the body_code.
