@@ -54,19 +54,26 @@ You must output a JSON object matching the NextflowPipelineAST schema.
 Instead of building complex JSON logic trees, you will write RAW NEXTFLOW GROOVY CODE for the `body_code` fields.
 
 # STRICT DSL2 & FORMATTING RULES
-1. **IMPORTS ARE CRITICAL** You MUST import every `step_...` or `multi_...` tool you use. 
+1. **IMPORTS ARE CRITICAL:** You MUST import every `step_...` or `multi_...` tool you use. 
    - NEVER use nf-core paths. 
    - Use local paths based on the prefix `../steps/<name>`, `../multi/<name>`, or `../functions/<name>.nf`.
-2. **NO WORKFLOW WRAPPERS** In the `body_code` for workflows and the entrypoint, DO NOT write `workflow {{ ... }}` or `main`. The rendering engine does this automatically. Just write the inner logic.
-3. **NO LOGIC IN PROCESSES** The `inline_processes` list is ONLY for raw bash scripts. Do not put Nextflow logic inside an inline process. Use `sub_workflows` for logic.
-4. **CHANNELS & TUPLES** Nextflow data often flows in tuples. If you use operators like `.multiMap`, handle the meta map correctly.
+2. **NO WORKFLOW WRAPPERS:** In the `body_code` for workflows and the entrypoint, DO NOT write `workflow { ... }` or `main:`. The rendering engine does this automatically. Just write the inner logic.
+3. **NO LOGIC IN PROCESSES:** The `inline_processes` list is ONLY for raw bash scripts. Do not put Nextflow logic inside an inline process. Use `sub_workflows` for logic.
+4. **CHANNELS & TUPLES:** Nextflow data often flows in tuples. If you use operators like `.multiMap`, handle the meta map correctly.
+
+# VARIABLE SCOPING & SUB-WORKFLOW COMMUNICATION (CRITICAL)
+5. **SCOPE IS ISOLATED:** Sub-workflows CANNOT magically see variables defined in the entrypoint. You MUST pass variables explicitly.
+   - **Inputs:** If a sub-workflow needs data, add the variable names to the `take_channels` JSON list (e.g., `["reads", "references"]`). 
+   - **Outputs:** If a sub-workflow generates data needed later, add the assignments to the `emit_channels` JSON list (e.g., `["consensus = ch_out.consensus"]`).
+   - DO NOT write manual `take:` or `emit:` blocks inside your `body_code`. The JSON fields handle this.
+6. **ENTRYPOINT RULES:** The `entrypoint` workflow CANNOT have an `emit:` block. You just call the sub-workflows and pass the channels between them. Do not emit from the entrypoint.
 
 # STRUCTURE EXPECTATIONS
-- `imports` List the tools to include with their correct local paths.
-- `globals` Define standard params and variables used in the pipeline.
-- `inline_processes` Custom bash scripts not found in the RAG context.
-- `sub_workflows` Reusable logic blocks. Write the DSL2 logic inside `body_code`.
-- `entrypoint` The main unnamed workflow execution block. Write your primary DSL2 logic directly inside `body_code`.
+- `imports`: List the tools to include with their correct local paths.
+- `globals`: Define standard params and variables used in the pipeline.
+- `inline_processes`: Custom bash scripts not found in the RAG context.
+- `sub_workflows`: Reusable logic blocks. Use `take_channels` and `emit_channels` to pass data in and out.
+- `entrypoint`: The main unnamed workflow execution block. Write your primary DSL2 logic directly inside `body_code`. Pass channels into sub-workflows explicitly (e.g., `my_workflow(ch_reads)`).
 """
 
 DIAGRAM_SYSTEM_PROMPT = """You are a Principal Bioinformatics Architect and Technical Documentation Expert.

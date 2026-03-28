@@ -81,17 +81,27 @@ class InlineProcess(BaseModel):
 class WorkflowBlock(BaseModel):
     name: str = Field(description="The name of the workflow.")
     take_channels: List[str] = Field(default=[], description="List of input channel names.")
-    emit_channels: List[str] = Field(default=[], description="List of output channel names.")
+    emit_channels: List[str] = Field(default=[], description="List of output channel names (e.g., 'reads = ch_prepared.reads').")
     body_code: str = Field(
-        description="The raw Groovy logic. DO NOT write 'workflow {{ }}' wrappers here. Just write the inner logic."
+        description="The raw Groovy logic. DO NOT write 'workflow { }', 'take:', or 'emit:' wrappers here."
     )
 
     @field_validator('body_code')
     def forbid_workflow_wrapper(cls, v):
         if re.search(r'^\s*workflow\s+[_a-zA-Z0-9]*\s*\{', v) or re.search(r'^\s*workflow\s*\{', v) or 'main:' in v:
             raise ValueError(
-                "FORMAT ERROR: DO NOT wrap the body_code in 'workflow {{ ... }}' or 'main:'. "
+                "FORMAT ERROR: DO NOT wrap the body_code in 'workflow { ... }' or 'main:'. "
                 "The rendering engine does this automatically. Only write the actual steps and operators inside the body."
+            )
+        return v
+        
+    @field_validator('body_code')
+    def forbid_manual_take_emit(cls, v):
+        """Forces the LLM to use the JSON arrays instead of hardcoding take/emit blocks."""
+        if re.search(r'^\s*take:', v, re.MULTILINE) or re.search(r'^\s*emit:', v, re.MULTILINE):
+            raise ValueError(
+                "SCOPE ERROR: DO NOT write 'take:' or 'emit:' blocks inside body_code. "
+                "You MUST put your inputs in the `take_channels` JSON list and outputs in the `emit_channels` JSON list."
             )
         return v
 
@@ -113,6 +123,15 @@ class Entrypoint(BaseModel):
     def forbid_workflow_wrapper(cls, v):
         if re.search(r'^\s*workflow\s*\{', v):
             raise ValueError("FORMAT ERROR: DO NOT wrap the entrypoint body_code in 'workflow { ... }'.")
+        return v
+
+    @field_validator('body_code')
+    def forbid_emit_in_entrypoint(cls, v):
+        if re.search(r'^\s*emit:', v, re.MULTILINE):
+            raise ValueError(
+                "SYNTAX ERROR: The main anonymous entrypoint `workflow { ... }` CANNOT have an 'emit:' block. "
+                "Just call your sub-workflows and processes. Remove the emit block."
+            )
         return v
 
 class NextflowPipelineAST(BaseModel):
