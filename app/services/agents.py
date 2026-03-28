@@ -54,7 +54,7 @@ You must output a JSON object matching the NextflowPipelineAST schema.
 Instead of building complex JSON logic trees you will write RAW NEXTFLOW GROOVY CODE for the body_code fields.
 
 # 1. STRICT DSL2 AND FORMATTING RULES
-* IMPORTS ARE CRITICAL. You MUST import every step_ multi_ or module_ tool you use. 
+* IMPORTS ARE CRITICAL. You MUST import every step_ multi_ or module_ tool you use, AND every helper function (like getSingleInput, getAssembly). 
   * NEVER use nf-core paths. 
   * Use exact local paths based on the prefix ../steps/<name> ../multi/<name> ../modules/<name> or ../functions/<name>.nf.
   * DO NOT import the same function twice from different files.
@@ -74,22 +74,34 @@ Nextflow is a reactive dataflow programming language. Channels act as asynchrono
 # 3. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
 Sub-workflows are isolated environments. They CANNOT see variables defined in the entrypoint. You MUST pass variables explicitly through take and emit channels.
 * INPUTS. If a sub-workflow needs data add the variable names to the take_channels JSON list. 
+* USE WHAT YOU TAKE. If you put a variable in take_channels, you MUST use it in the body_code. If a workflow doesn't need a variable, do not take it!
 * OUTPUTS. If a sub-workflow generates data needed later add the assignments to the emit_channels JSON list. You MUST emit exactly what you defined.
   * Right: ["consensus = ivar_res.consensus"]
   * Wrong: Emitting consensus_bowtie when you only defined a variable named bowtie_out.
-* EMITTING ALL REQUIRED CHANNELS. If you define a channel in a sub-workflow (like `refs_optional`) and try to use it later in the entrypoint (like `inputs.refs_optional`), you MUST include it in your `emit_channels` list! If you don't emit it, it disappears.
-* EMITTING MODIFIED CHANNELS. If you use operators like cross or map and save the result to a new variable like prepared_data you MUST emit that new variable. Do not emit the raw input channel. For example use ["reads = prepared_data.reads", "refs = prepared_data.refs"] in your emit_channels.
+* STRICT EMIT FORMAT. DO NOT put function calls in emit_channels. ONLY put variable assignments.
+  * Right: ["bowtie_res = bowtie_res.consensus"]
+  * Wrong: ["bowtie_res = step_2AS_mapping__bowtie(reads)"]
+* EMITTING ALL REQUIRED CHANNELS. If you define a channel in a sub-workflow and try to use it later in the entrypoint, you MUST include it in your emit_channels list!
+* EMITTING MODIFIED CHANNELS. If you use operators like .cross or .map and save the result to a new variable (like prepared_data) you MUST emit that new variable. Do not emit the raw input channel.
 * NO MANUAL KEYWORDS. DO NOT write manual take or emit blocks inside your body_code. The JSON fields handle this for you.
 
 # 4. JSON OUTPUT EXAMPLE (CRITICAL)
-This is exactly how you must structure a sub-workflow. Notice the complete ABSENCE of take and emit keywords inside the body_code.
+Notice how helper functions are explicitly imported, and there are NO take and emit keywords inside the body_code!
 
 ```json
 {{
-  "name": "run_mapping",
-  "take_channels": ["reads", "refs"],
-  "emit_channels": ["consensus_bowtie = bowtie_res.consensus", "consensus_ivar = ivar_res.consensus"],
-  "body_code": "bowtie_res = step_2AS_mapping__bowtie(reads, refs)\\nivar_res = step_2AS_mapping__ivar(reads, refs)"
+  "imports": [
+    {{ "module_path": "../functions/parameters.nf", "functions": ["getSingleInput", "getReference"] }},
+    {{ "module_path": "../steps/step_2AS_mapping__bowtie", "functions": ["step_2AS_mapping__bowtie"] }}
+  ],
+  "sub_workflows": [
+    {{
+      "name": "run_mapping",
+      "take_channels": ["reads", "refs"],
+      "emit_channels": ["consensus_bowtie = bowtie_res.consensus"],
+      "body_code": "bowtie_res = step_2AS_mapping__bowtie(reads, refs)"
+    }}
+  ]
 }}
 ```
 
@@ -105,7 +117,7 @@ Do not write a single monolithic workflow. You MUST break down the logic into mo
 * You just call the sub-workflows and pass the channels between them.
 
 # 7. STRUCTURE EXPECTATIONS
-* imports: List the tools to include with their correct local paths.
+* imports: List the tools to include with their correct local paths. Don't forget helper functions!
 * globals: Define standard params and variables used in the pipeline.
 * inline_processes: Custom bash scripts NOT found in the RAG context.
 * sub_workflows: Reusable logic blocks. Use take_channels and emit_channels to pass data in and out. Make the pipeline modular here.

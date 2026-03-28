@@ -191,57 +191,48 @@ class NextflowPipelineAST(BaseModel):
     entrypoint: Entrypoint
 
     @model_validator(mode='after')
-    def prune_unused_imports(self):
+    def auto_generate_imports(self):
         all_code = self.entrypoint.body_code
         for sw in self.sub_workflows:
             all_code += "\n" + sw.body_code
         for ip in self.inline_processes:
             all_code += "\n" + ip.script_block
         for g in self.globals:
-            all_code += "\n" + g.value  
+            all_code += "\n" + g.value
 
-        cleaned_imports = []
-        for imp in self.imports:
-            used_functions = []
-            for func in imp.functions:
-                base_name = func.split(' as ')[-1].strip()
-                
-                pattern = rf"\b{base_name}\b"
-                if re.search(pattern, all_code):
-                    used_functions.append(func)
-            
-            if used_functions:
-                imp.functions = used_functions
-                cleaned_imports.append(imp)
-                
-        self.imports = cleaned_imports
-        return self
-
-    @model_validator(mode='after')
-    def enforce_defined_processes(self):
-        allowed_callables = set()
+        pattern = re.compile(r'(?<!\.)\b((?:step_|multi_|module_|prepare_|get[A-Z]|extract[A-Z]|is[A-Z]|parse[A-Z]|execution[A-Z]|task[A-Z]|check[A-Z])[a-zA-Z0-9_]*)\s*\(')
+        used_callables = set(match.group(1) for match in pattern.finditer(all_code))
         
-        for imp in self.imports:
-            for func in imp.functions:
-                alias = func.split(' as ')[-1].strip()
-                allowed_callables.add(alias)
-        for p in self.inline_processes:
-            allowed_callables.add(p.name)
-        for sw in self.sub_workflows:
-            allowed_callables.add(sw.name)
+        defined_sws = {sw.name for sw in self.sub_workflows}
+        used_callables = used_callables - defined_sws
 
-        all_code = self.entrypoint.body_code
-        for sw in self.sub_workflows:
-            all_code += "\n" + sw.body_code
+        common_funcs = {'extractDsRef', 'parseMetadataFromFileName', 'executionMetadata', 'extractKey', 'taskMemory', 'getEmpty', 'stepInputs', 'getRisCd', 'flattenPath'}
+        param_funcs = {'getSingleInput', 'getReference', 'getReferenceOptional', 'isIlluminaPaired', 'isCompatibleWithSeqType', 'isIonTorrent', 'getInput', 'getKingdom', 'checkEnum', 'getTrimmedReads', 'getAssembly'}
 
-        pattern = re.compile(r'(?<!\.)\b((?:step_|multi_|module_|prepare_|get[A-Z]|extract[A-Z]|is[A-Z]|parse[A-Z])[a-zA-Z0-9_]*)\s*\(')
-        for match in pattern.finditer(all_code):
-            func_name = match.group(1)
-            if func_name not in allowed_callables:
-                raise ValueError(
-                    f"VALIDATION ERROR: The function '{func_name}' is used in your code but NEVER IMPORTED. "
-                    f"You MUST add '{func_name}' to the 'imports' list so Nextflow knows where to find it."
-                )
+        import_map = {}
+        for func in used_callables:
+            if func.startswith('step_'):
+                path = f"../steps/{func}.nf"
+            elif func.startswith('multi_'):
+                path = f"../multi/{func}.nf"
+            elif func.startswith('module_'):
+                path = f"../modules/{func}.nf"
+            elif func in common_funcs:
+                path = "../functions/common.nf"
+            elif func in param_funcs:
+                path = "../functions/parameters.nf"
+            else:
+                continue
+                
+            if path not in import_map:
+                import_map[path] = []
+            import_map[path].append(func)
+
+        new_imports = []
+        for path, funcs in import_map.items():
+            new_imports.append(ImportItem(module_path=path, functions=sorted(funcs)))
+            
+        self.imports = new_imports
         return self
 
     @model_validator(mode='after')
