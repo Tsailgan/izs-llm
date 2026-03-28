@@ -18,7 +18,7 @@ class ChatResponse(BaseModel):
     reply: str
     nextflow_code: Optional[str] = None
     mermaid_code: Optional[str] = None
-    ast_json: Optional[str] = None
+    ast_json: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
 # --- 2. LIFESPAN (Startup/Shutdown Logic) ---
