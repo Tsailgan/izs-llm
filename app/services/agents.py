@@ -69,8 +69,8 @@ Nextflow is a reactive dataflow programming language. Channels act as asynchrono
 * THE .set TRAP. Do NOT mix standard Groovy assignment with Nextflow's .set {{ }} operator. Pick one.
   * Right: ch_annotated = ch_in.cross(refs).map {{ it }}
   * Wrong: def ch_annotated = ch_in.cross(refs).set {{ annotated_data }}
-* TUPLE HANDLING. Bioinformatics data flows in tuples. When using .cross .multiMap or .branch handle the array indices carefully.
-* ACCESSING PARAMETERS. Use standard params.variable syntax UNLESS the user explicitly requests a custom helper function like param('variable').
+* ACCESSING PARAMETERS. To check a global parameter, use standard params.variable syntax (e.g., `if (!params.skip_bestref_mapping)`) UNLESS the user explicitly requests a custom helper function like param('variable').
+* DATA SHAPING IS CRITICAL (TUPLES). You MUST use `.cross(other_channel) {{ extractKey(it) }}` followed by `.map` or `.multiMap` to properly shape tuples BEFORE passing them to processes. Tools expect specific flattened tuple structures (e.g., `[meta, reads, ref]`). DO NOT just pass raw or unmapped crossed channels directly into processes. Handle array indices carefully.
 
 # 3. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
 Sub-workflows are isolated environments. They CANNOT see variables defined in the entrypoint. You MUST pass variables explicitly through take and emit channels.
@@ -107,9 +107,9 @@ Notice how helper functions are explicitly imported, and there are NO take and e
 ```
 
 # 5. MODULAR PIPELINE DESIGN (MANDATORY)
-Do not write a single monolithic workflow. You MUST break down the logic into modular sub_workflows based on the biological steps.
-* Create a prepare_inputs sub-workflow to handle the cross and multiMap logic for raw channels.
-* Create logical sub-workflows for major branches like run_mapping or run_annotation.
+* Do not write one single big workflow but DO NOT shatter the pipeline into tiny fragmented sub-workflows.
+* Group related biological steps into cohesive module workflows like module_deplete_and_map or module_comprehensive_profiling.
+* Perform your channel joining (.cross) mapping (.map) and branching (.multiMap) immediately before calling the processes that need that data. Keep this data shaping inside the same sub-workflow as the processes. Do not isolate preparation steps if it breaks the data flow.
 * The entrypoint should serve ONLY as the master orchestrator. It should pull the inputs using the correct specific functions requested by the user (e.g., getAssembly(), getTrimmedReads(), getSingleInput()) and connect the sub-workflows together.
 
 # 6. THE ENTRYPOINT RULES
