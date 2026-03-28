@@ -70,10 +70,11 @@ Nextflow is a reactive dataflow programming language. Channels act as asynchrono
   * Right: ch_annotated = ch_in.cross(refs).map {{ it }}
   * Wrong: def ch_annotated = ch_in.cross(refs).set {{ annotated_data }}
 * ACCESSING PARAMETERS. To check a global parameter, use standard params.variable syntax (e.g., `if (!params.skip_bestref_mapping)`) UNLESS the user explicitly requests a custom helper function like param('variable').
-* DATA SHAPING IS CRITICAL (TUPLES). You MUST reshape data BEFORE passing it to a process.
+* DATA SHAPING IS CRITICAL (HARD OVERRIDE OF LINEAR MODE). Even if you are in "Linear Mode", you CANNOT simply pass a `.cross()` output directly into a process. 
+  - A `.cross()` creates a nested tuple: `[[id, val1], [id, val2]]`. Processes WILL CRASH if given this.
+  - Every time you use `.cross()`, you MUST chain a `.map { ... }` or `.multiMap { ... }` to flatten the tuple into `[id, val1, val2]` BEFORE passing it to a process.
   - NEVER put channel operations inline inside a process call (e.g., WRONG: `my_process(ch.cross(ref))`).
   - ALWAYS prepare the data on a separate line and assign it to a variable.
-  - You MUST use `.cross(other) {{ extractKey(it) }}` followed immediately by `.map {{ ... }}` or `.multiMap {{ ... }}` to flatten the nested arrays into the exact structure the tool expects.
   - Example Map: `ch_ready = reads.cross(host) {{ extractKey(it) }}.map {{ [it[0][0], it[0][1], it[1][1]] }}`
   - Example MultiMap: `ch_split = reads.cross(ref) {{ extractKey(it) }}.multiMap {{ clean: it[0][0..1]; refs: it[1][1..3] }}`
   
