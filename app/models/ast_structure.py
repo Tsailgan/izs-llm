@@ -197,6 +197,8 @@ class NextflowPipelineAST(BaseModel):
             all_code += "\n" + sw.body_code
         for ip in self.inline_processes:
             all_code += "\n" + ip.script_block
+        for g in self.globals:
+            all_code += "\n" + g.value  
 
         cleaned_imports = []
         for imp in self.imports:
@@ -217,7 +219,6 @@ class NextflowPipelineAST(BaseModel):
 
     @model_validator(mode='after')
     def enforce_defined_processes(self):
-        """If a step_ or multi_ tool is used in the body, it MUST be imported."""
         allowed_callables = set()
         
         for imp in self.imports:
@@ -233,12 +234,12 @@ class NextflowPipelineAST(BaseModel):
         for sw in self.sub_workflows:
             all_code += "\n" + sw.body_code
 
-        pattern = re.compile(r'\b((?:step_|multi_|module_|prepare_)[a-zA-Z0-9_]+)\s*\(')
+        pattern = re.compile(r'(?<!\.)\b((?:step_|multi_|module_|prepare_|get[A-Z]|extract[A-Z]|is[A-Z]|parse[A-Z])[a-zA-Z0-9_]*)\s*\(')
         for match in pattern.finditer(all_code):
             func_name = match.group(1)
             if func_name not in allowed_callables:
                 raise ValueError(
-                    f"VALIDATION ERROR: The process '{func_name}' is used in your code but NEVER IMPORTED. "
+                    f"VALIDATION ERROR: The function '{func_name}' is used in your code but NEVER IMPORTED. "
                     f"You MUST add '{func_name}' to the 'imports' list so Nextflow knows where to find it."
                 )
         return self
