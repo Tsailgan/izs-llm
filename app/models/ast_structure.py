@@ -87,7 +87,6 @@ class WorkflowBlock(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def rescue_and_heal_body(cls, data: dict) -> dict:
-        """Rescues assignments from hallucinated emit blocks before stripping them."""
         if not isinstance(data, dict): return data
         
         body = data.get('body_code', '')
@@ -109,6 +108,23 @@ class WorkflowBlock(BaseModel):
 
         data['body_code'] = body.strip()
         return data
+
+    @model_validator(mode='after')
+    def enforce_take_channel_usage(self):
+        if not self.take_channels:
+            return self
+            
+        combined_text = self.body_code + " " + " ".join(self.emit_channels)
+        
+        for ch in self.take_channels:
+            pattern = rf"\b{re.escape(ch)}\b"
+            if not re.search(pattern, combined_text):
+                raise ValueError(
+                    f"LOGIC ERROR in workflow '{self.name}'. You defined '{ch}' in take_channels "
+                    f"but you never used it in the body_code and never emitted it. "
+                    f"Either use it, emit it directly, or remove it from take_channels."
+                )
+        return self
 
     @model_validator(mode='after')
     def forbid_recursion(self):
