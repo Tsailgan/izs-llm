@@ -83,14 +83,14 @@ class WorkflowBlock(BaseModel):
     take_channels: List[str] = Field(default=[], description="List of input channel names.")
     emit_channels: List[str] = Field(default=[], description="List of output channel names (e.g., 'reads = ch_prepared.reads').")
     body_code: str = Field(
-        description="The raw Groovy logic. DO NOT write 'workflow { }', 'take:', or 'emit:' wrappers here."
+        description="The raw Groovy logic. DO NOT write 'workflow {{ }}', 'take:', or 'emit:' wrappers here."
     )
 
     @field_validator('body_code')
     def forbid_workflow_wrapper(cls, v):
         if re.search(r'^\s*workflow\s+[_a-zA-Z0-9]*\s*\{', v) or re.search(r'^\s*workflow\s*\{', v) or 'main:' in v:
             raise ValueError(
-                "FORMAT ERROR: DO NOT wrap the body_code in 'workflow { ... }' or 'main:'. "
+                "FORMAT ERROR: DO NOT wrap the body_code in 'workflow {{ ... }}' or 'main:'. "
                 "The rendering engine does this automatically. Only write the actual steps and operators inside the body."
             )
         return v
@@ -116,20 +116,20 @@ class WorkflowBlock(BaseModel):
 
 class Entrypoint(BaseModel):
     body_code: str = Field(
-        description="The code inside the main unnamed workflow. Do not write 'workflow { }'."
+        description="The code inside the main unnamed workflow. Do not write 'workflow {{ }}'."
     )
 
     @field_validator('body_code')
     def forbid_workflow_wrapper(cls, v):
         if re.search(r'^\s*workflow\s*\{', v):
-            raise ValueError("FORMAT ERROR: DO NOT wrap the entrypoint body_code in 'workflow { ... }'.")
+            raise ValueError("FORMAT ERROR: DO NOT wrap the entrypoint body_code in 'workflow {{ ... }}'.")
         return v
 
     @field_validator('body_code')
     def forbid_emit_in_entrypoint(cls, v):
         if re.search(r'^\s*emit:', v, re.MULTILINE):
             raise ValueError(
-                "SYNTAX ERROR: The main anonymous entrypoint `workflow { ... }` CANNOT have an 'emit:' block. "
+                "SYNTAX ERROR: The main anonymous entrypoint `workflow {{ ... }}` CANNOT have an 'emit:' block. "
                 "Just call your sub-workflows and processes. Remove the emit block."
             )
         return v

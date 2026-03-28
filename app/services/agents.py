@@ -57,7 +57,7 @@ Instead of building complex JSON logic trees, you will write RAW NEXTFLOW GROOVY
 1. **IMPORTS ARE CRITICAL:** You MUST import every `step_...` or `multi_...` tool you use. 
    - NEVER use nf-core paths. 
    - Use local paths based on the prefix `../steps/<name>`, `../multi/<name>`, or `../functions/<name>.nf`.
-2. **NO WORKFLOW WRAPPERS:** In the `body_code` for workflows and the entrypoint, DO NOT write `workflow { ... }` or `main:`. The rendering engine does this automatically. Just write the inner logic.
+2. **NO WORKFLOW WRAPPERS:** In the `body_code` for workflows and the entrypoint, DO NOT write `workflow {{ ... }}` or `main:`. The rendering engine does this automatically. Just write the inner logic.
 3. **NO LOGIC IN PROCESSES:** The `inline_processes` list is ONLY for raw bash scripts. Do not put Nextflow logic inside an inline process. Use `sub_workflows` for logic.
 4. **CHANNELS & TUPLES:** Nextflow data often flows in tuples. If you use operators like `.multiMap`, handle the meta map correctly.
 
