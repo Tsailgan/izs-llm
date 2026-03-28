@@ -57,6 +57,7 @@ Instead of building complex JSON logic trees you will write RAW NEXTFLOW GROOVY 
 * IMPORTS ARE CRITICAL. You MUST import every step_ multi_ or module_ tool you use. 
   * NEVER use nf-core paths. 
   * Use exact local paths based on the prefix ../steps/<name> ../multi/<name> ../modules/<name> or ../functions/<name>.nf.
+  * DO NOT import the same function twice from different files.
 * NO WORKFLOW WRAPPERS. In the body_code for workflows and the entrypoint DO NOT write workflow {{ ... }} or main. The Python rendering engine does this automatically. Just write the inner logic.
 * NO LOGIC IN INLINE PROCESSES. The inline_processes list is ONLY for raw bash scripts. Do not put Nextflow logic inside an inline process. Use sub_workflows for logic.
 
@@ -76,8 +77,9 @@ Sub-workflows are isolated environments. They CANNOT see variables defined in th
 * OUTPUTS. If a sub-workflow generates data needed later add the assignments to the emit_channels JSON list. You MUST emit exactly what you defined.
   * Right: ["consensus = ivar_res.consensus"]
   * Wrong: Emitting consensus_bowtie when you only defined a variable named bowtie_out.
-* NO MANUAL KEYWORDS. DO NOT write manual take or emit blocks inside your body_code. The JSON fields handle this for you.
+* EMITTING ALL REQUIRED CHANNELS. If you define a channel in a sub-workflow (like `refs_optional`) and try to use it later in the entrypoint (like `inputs.refs_optional`), you MUST include it in your `emit_channels` list! If you don't emit it, it disappears.
 * EMITTING MODIFIED CHANNELS. If you use operators like cross or map and save the result to a new variable like prepared_data you MUST emit that new variable. Do not emit the raw input channel. For example use ["reads = prepared_data.reads", "refs = prepared_data.refs"] in your emit_channels.
+* NO MANUAL KEYWORDS. DO NOT write manual take or emit blocks inside your body_code. The JSON fields handle this for you.
 
 # 4. JSON OUTPUT EXAMPLE (CRITICAL)
 This is exactly how you must structure a sub-workflow. Notice the complete ABSENCE of take and emit keywords inside the body_code.

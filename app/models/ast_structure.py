@@ -175,6 +175,31 @@ class NextflowPipelineAST(BaseModel):
     entrypoint: Entrypoint
 
     @model_validator(mode='after')
+    def prune_unused_imports(self):
+        all_code = self.entrypoint.body_code
+        for sw in self.sub_workflows:
+            all_code += "\n" + sw.body_code
+        for ip in self.inline_processes:
+            all_code += "\n" + ip.script_block
+
+        cleaned_imports = []
+        for imp in self.imports:
+            used_functions = []
+            for func in imp.functions:
+                base_name = func.split(' as ')[-1].strip()
+                
+                pattern = rf"\b{base_name}\b"
+                if re.search(pattern, all_code):
+                    used_functions.append(func)
+            
+            if used_functions:
+                imp.functions = used_functions
+                cleaned_imports.append(imp)
+                
+        self.imports = cleaned_imports
+        return self
+
+    @model_validator(mode='after')
     def enforce_defined_processes(self):
         """If a step_ or multi_ tool is used in the body, it MUST be imported."""
         allowed_callables = set()
