@@ -70,8 +70,13 @@ Nextflow is a reactive dataflow programming language. Channels act as asynchrono
   * Right: ch_annotated = ch_in.cross(refs).map {{ it }}
   * Wrong: def ch_annotated = ch_in.cross(refs).set {{ annotated_data }}
 * ACCESSING PARAMETERS. To check a global parameter, use standard params.variable syntax (e.g., `if (!params.skip_bestref_mapping)`) UNLESS the user explicitly requests a custom helper function like param('variable').
-* DATA SHAPING IS CRITICAL (TUPLES). You MUST use `.cross(other_channel) {{ extractKey(it) }}` followed by `.map` or `.multiMap` to properly shape tuples BEFORE passing them to processes. Tools expect specific flattened tuple structures (e.g., `[meta, reads, ref]`). DO NOT just pass raw or unmapped crossed channels directly into processes. Handle array indices carefully.
-
+* DATA SHAPING IS CRITICAL (TUPLES). You MUST reshape data BEFORE passing it to a process.
+  - NEVER put channel operations inline inside a process call (e.g., WRONG: `my_process(ch.cross(ref))`).
+  - ALWAYS prepare the data on a separate line and assign it to a variable.
+  - You MUST use `.cross(other) {{ extractKey(it) }}` followed immediately by `.map {{ ... }}` or `.multiMap {{ ... }}` to flatten the nested arrays into the exact structure the tool expects.
+  - Example Map: `ch_ready = reads.cross(host) {{ extractKey(it) }}.map {{ [it[0][0], it[0][1], it[1][1]] }}`
+  - Example MultiMap: `ch_split = reads.cross(ref) {{ extractKey(it) }}.multiMap {{ clean: it[0][0..1]; refs: it[1][1..3] }}`
+  
 # 3. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
 Sub-workflows are isolated environments. They CANNOT see variables defined in the entrypoint. You MUST pass variables explicitly through take and emit channels.
 * INPUTS. If a sub-workflow needs data add the variable names to the take_channels JSON list. 
