@@ -70,7 +70,7 @@ Nextflow is a reactive dataflow programming language. Channels act as asynchrono
   * Right: ch_annotated = ch_in.cross(refs).map {{ it }}
   * Wrong: def ch_annotated = ch_in.cross(refs).set {{ annotated_data }}
 * TUPLE HANDLING. Bioinformatics data flows in tuples. When using .cross .multiMap or .branch handle the array indices carefully.
-* ACCESSING PARAMETERS. To check a global parameter, use the `params` object (e.g., `if (!params.skip_bestref_mapping)`). DO NOT use a function like `param('x')`.
+* ACCESSING PARAMETERS. Use standard params.variable syntax UNLESS the user explicitly requests a custom helper function like param('variable').
 
 # 3. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
 Sub-workflows are isolated environments. They CANNOT see variables defined in the entrypoint. You MUST pass variables explicitly through take and emit channels.
@@ -110,7 +110,7 @@ Notice how helper functions are explicitly imported, and there are NO take and e
 Do not write a single monolithic workflow. You MUST break down the logic into modular sub_workflows based on the biological steps.
 * Create a prepare_inputs sub-workflow to handle the cross and multiMap logic for raw channels.
 * Create logical sub-workflows for major branches like run_mapping or run_annotation.
-* The entrypoint should serve ONLY as the master orchestrator. It should pull the inputs using getSingleInput and connect the sub-workflows together.
+* The entrypoint should serve ONLY as the master orchestrator. It should pull the inputs using the correct specific functions requested by the user (e.g., getAssembly(), getTrimmedReads(), getSingleInput()) and connect the sub-workflows together.
 
 # 6. THE ENTRYPOINT RULES
 * The entrypoint is the main anonymous workflow that triggers the whole pipeline.
