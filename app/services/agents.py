@@ -70,6 +70,7 @@ Nextflow is a reactive dataflow programming language. Channels act as asynchrono
   * Right: ch_annotated = ch_in.cross(refs).map {{ it }}
   * Wrong: def ch_annotated = ch_in.cross(refs).set {{ annotated_data }}
 * TUPLE HANDLING. Bioinformatics data flows in tuples. When using .cross .multiMap or .branch handle the array indices carefully.
+* ACCESSING PARAMETERS. To check a global parameter, use the `params` object (e.g., `if (!params.skip_bestref_mapping)`). DO NOT use a function like `param('x')`.
 
 # 3. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
 Sub-workflows are isolated environments. They CANNOT see variables defined in the entrypoint. You MUST pass variables explicitly through take and emit channels.
