@@ -206,9 +206,29 @@ class NextflowPipelineAST(BaseModel):
         defined_sws = {sw.name for sw in self.sub_workflows}
         used_callables = used_callables - defined_sws
 
-        common_funcs = {'extractDsRef', 'parseMetadataFromFileName', 'executionMetadata', 'extractKey', 'taskMemory', 'getEmpty', 'stepInputs', 'getRisCd', 'flattenPath'}
-        param_funcs = {'getSingleInput', 'getReference', 'getReferenceOptional', 'isIlluminaPaired', 'isCompatibleWithSeqType', 'isIonTorrent', 'getInput', 'getKingdom', 'checkEnum', 'getTrimmedReads', 'getAssembly'}
+        common_funcs = {
+            'parseMetadataFromFileName', 'executionMetadata', 'taskMemory', 'taskTime',
+            'getRisCd', 'extractKey', 'stepInputs', 'extractDsRef', 'getBaseName',
+            'getGB', 'getEmpty', 'parseRISCD', 'isFastqRiscd', 'isFastaRiscd',
+            'isSpeciesSupported', 'csv2map', 'flattenPath', 'logHeader'
+        }
 
+        param_funcs = {
+            'getTrimmedReads', 'getAssembly', 'getDepletedReads', 'getReferenceCodes',
+            'getNCBICodes', 'getReferences', 'getReference', 'getReferenceUnkeyed',
+            'getReferenceOptional', 'getHost', 'getGenusSpecies', 'getModule',
+            'getAbricateDatabase', 'getBlastDatabase', 'getParamTaxaId', '_getParamAsValue',
+            '_getParam', 'getDS', 'isFullOutput', 'getResult', 'getKrakenResults',
+            'getInput', 'getVCFs', 'hasEnoughFastqData', 'hasFastqData', 'param',
+            'optional', 'optionalOrDefault', 'isIonTorrent', 'isNanopore', 'isIlluminaPaired',
+            'isCompatibleWithSeqType', 'isSegmentedMapping', 'checkEnum', 'getHostReference',
+            'getLongReads', 'paramWrap', 'optWrap', '_getReferences', '_getSingleReference',
+            'getHostOptional', 'getHostUnkeyed', 'getGenusSpeciesOptionalUnkeyed',
+            'getGenusSpeciesOptional', 'getSpecies', 'getBlastDatabaseUnkeyed', 'getKingdom',
+            'getTaxIdsUnkeyed', 'getParamIncludeParents', 'getParamIncludeChildren',
+            '_getAlleles', 'getParam', 'getInputOf', 'getInputFolders', 'getSingleInput'
+        }
+        
         import_map = {}
         for func in used_callables:
             if func.startswith('step_'):
