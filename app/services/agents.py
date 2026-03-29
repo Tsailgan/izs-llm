@@ -139,8 +139,7 @@ trimmed.multiMap {{
 }}.set {{ trAndRef }}
 ```
 
-* THE "PRE-SHAPED DATA" IDIOM (Chain of Custody):
-If a sub-workflow receives a channel that was ALREADY joined by a previous module or `prepare_inputs` block, DO NOT use `.cross()` or `.combine()` again! The data is already synchronized. Just pass it directly to the process or use `.map{{}}` to extract what you need.
+* VOID TOOL OVERRIDE: Tools like QUAST, FastQC, NanoPlot, Pangolin, and Prokka are VOID tools. They write directly to `publishDir` and return no channels. If the Consultant's plan asks you to "emit the report" for these tools, YOU MUST IGNORE THAT INSTRUCTION. Simply call the process/module and do not emit it.
 
 # 2. STRICT DSL2 AND FORMATTING RULES
 * NO WORKFLOW WRAPPERS. In the body_code for workflows and the entrypoint DO NOT write workflow {{ ... }} or main. The Python rendering engine does this automatically. Just write the inner logic.

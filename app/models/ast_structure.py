@@ -158,10 +158,13 @@ class WorkflowBlock(BaseModel):
                     f"\n=======================================================\n"
                     f"FATAL ERROR: YOU ARE TRAPPED IN A HALLUCINATION LOOP!\n"
                     f"You are trying to emit '{emit_str}'.\n"
-                    f"THIS IS A VOID TOOL/MODULE. IT HAS NO OUTPUTS TO EMIT.\n"
-                    f"1. REMOVE '{emit_str}' from `emit_channels` list completely.\n"
-                    f"2. DO NOT assign this tool to a variable in your body_code.\n"
-                    f"3. JUST CALL the module directly: `module_qc_quast(input)`.\n"
+                    f"THIS IS A VOID TOOL. IT HAS NO OUTPUTS TO EMIT.\n"
+                    f"*** AUTHORITY OVERRIDE ***:\n"
+                    f"If the Consultant's plan explicitly told you to 'emit the report', THE PLAN IS WRONG.\n"
+                    f"You have explicit permission to IGNORE that part of the plan.\n"
+                    f"CRITICAL REPAIR INSTRUCTION:\n"
+                    f"1. Completely remove '{emit_str}' from the `emit_channels` list.\n"
+                    f"2. Do not emit anything related to this tool.\n"
                     f"=======================================================\n"
                 )
         return v
@@ -372,6 +375,31 @@ class WorkflowBlock(BaseModel):
                     f"In cohesive-ngsmanager, raw process calls are FORBIDDEN.\n"
                     f"CRITICAL REPAIR INSTRUCTION:\n"
                     f"Use the full module name for QC: `module_qc_fastqc`, `module_qc_nanoplot`, or `module_qc_quast`.\n"
+                    f"=======================================================\n"
+                )
+        return self
+
+    @model_validator(mode='after')
+    def forbid_active_channels_in_subworkflows(self):
+        if not self.body_code:
+            return self
+
+        active_channel_funcs = [
+            'getSingleInput', 'getInput', 'getReference', 'getReferences',
+            'getHostUnkeyed', 'getHost', 'getAssembly', 'getTrimmedReads'
+        ]
+
+        for func in active_channel_funcs:
+            if re.search(rf'\b{func}\s*\(', self.body_code):
+                raise ValueError(
+                    f"\n=======================================================\n"
+                    f"ARCHITECTURE ERROR in sub-workflow '{self.name}':\n"
+                    f"You called `{func}()` inside a sub-workflow.\n"
+                    f"ALL active data channels MUST be instantiated in the `entrypoint` workflow and passed into your modules via `take:` channels.\n"
+                    f"CRITICAL REPAIR INSTRUCTION:\n"
+                    f"1. Delete `{func}()` from '{self.name}'.\n"
+                    f"2. Add a `take:` parameter to '{self.name}' to receive the data.\n"
+                    f"3. Move `{func}()` into the `entrypoint` workflow and pass it as an argument.\n"
                     f"=======================================================\n"
                 )
         return self
