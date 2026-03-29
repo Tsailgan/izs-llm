@@ -143,26 +143,27 @@ class WorkflowBlock(BaseModel):
 
     @field_validator('emit_channels')
     def forbid_void_emits(cls, v):
-        """Strictly prevents the LLM from trying to emit outputs from known Void tools."""
         void_keywords = [
-            'pangolin', 'lineage_report', 'fastqc', 'quast', 'nanoplot', 'centrifuge', 
+            'pangolin', 'fastqc', 'quast', 'nanoplot', 'centrifuge', 
             'confindr', 'mash', 'resfinder', 'staramr', 'prokka', 
             'mlst', 'chewbbaca', 'flaa'
         ]
+        
+        void_modules = ['module_qc_fastqc', 'module_qc_nanoplot', 'module_qc_quast']
+        
         for emit_str in v:
             lower_str = emit_str.lower()
-            for kw in void_keywords:
-                if kw in lower_str:
-                    raise ValueError(
-                        f"\n=======================================================\n"
-                        f"FATAL ERROR: YOU ARE TRAPPED IN A HALLUCINATION LOOP!\n"
-                        f"You are trying to emit '{emit_str}' which is related to '{kw}'.\n"
-                        f"'{kw.upper()}' IS A VOID TOOL. IT HAS NO OUTPUTS TO EMIT.\n"
-                        f"1. REMOVE '{emit_str}' from `emit_channels` completely.\n"
-                        f"2. DO NOT assign {kw} to a variable in your body_code. (WRONG: `res = {kw}(...)` -> RIGHT: `{kw}(...)`)\n"
-                        f"3. DO NOT rename the variable to trick the validator. JUST DELETE THE EMIT.\n"
-                        f"=======================================================\n"
-                    )
+            if any(kw in lower_str for kw in void_keywords) or any(mod in lower_str for mod in void_modules):
+                raise ValueError(
+                    f"\n=======================================================\n"
+                    f"FATAL ERROR: YOU ARE TRAPPED IN A HALLUCINATION LOOP!\n"
+                    f"You are trying to emit '{emit_str}'.\n"
+                    f"THIS IS A VOID TOOL/MODULE. IT HAS NO OUTPUTS TO EMIT.\n"
+                    f"1. REMOVE '{emit_str}' from `emit_channels` list completely.\n"
+                    f"2. DO NOT assign this tool to a variable in your body_code.\n"
+                    f"3. JUST CALL the module directly: `module_qc_quast(input)`.\n"
+                    f"=======================================================\n"
+                )
         return v
 
     @model_validator(mode='after')
@@ -356,9 +357,8 @@ class WorkflowBlock(BaseModel):
         
         valid_funcs = {
             'extractKey', 'getEmpty', 'extractDsRef', 'groupTuple', 'tuple', 
-            'file', 'println', 'log', 'exit', 'Channel', 'getSingleInput', 
-            'getInput', 'getReference', 'getReferences', 'getHostUnkeyed', 
-            'param', 'optional', 'checkEnum'
+            'file', 'getSingleInput', 'getInput', 'getReference', 'getReferences', 
+            'getHostUnkeyed', 'module_qc_fastqc', 'module_qc_nanoplot', 'module_qc_quast'
         }
 
         calls = re.finditer(r'(?<!\.)\b([a-zA-Z0-9_]+)\s*\(', self.body_code)
@@ -369,22 +369,9 @@ class WorkflowBlock(BaseModel):
                 raise ValueError(
                     f"\n=======================================================\n"
                     f"HALLUCINATED PROCESS ERROR in '{self.name}': You called `{func_name}()` directly.\n"
-                    f"In cohesive-ngsmanager, you CANNOT call naked process names. All external tools MUST be called via their wrapper steps.\n"
+                    f"In cohesive-ngsmanager, raw process calls are FORBIDDEN.\n"
                     f"CRITICAL REPAIR INSTRUCTION:\n"
-                    f"Find the correct `step_` wrapper for `{func_name}` (e.g., `step_..._{func_name}`) and use that instead.\n"
-                    f"=======================================================\n"
-                )
-
-        pipes = re.finditer(r'\|\s*([a-zA-Z0-9_]+)\b', self.body_code)
-        for match in pipes:
-            pipe_target = match.group(1)
-            if not pipe_target.startswith(valid_prefixes) and pipe_target not in valid_funcs:
-                 raise ValueError(
-                    f"\n=======================================================\n"
-                    f"PIPING ERROR in '{self.name}': You piped into `{pipe_target}`.\n"
-                    f"You MUST pipe into a valid `step_` wrapper. Raw naked processes are forbidden.\n"
-                    f"CRITICAL REPAIR INSTRUCTION:\n"
-                    f"Replace `{pipe_target}` with its full `step_..._{pipe_target}` wrapper name.\n"
+                    f"Use the full module name for QC: `module_qc_fastqc`, `module_qc_nanoplot`, or `module_qc_quast`.\n"
                     f"=======================================================\n"
                 )
         return self
