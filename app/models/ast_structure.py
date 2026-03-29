@@ -97,7 +97,12 @@ class WorkflowBlock(BaseModel):
             emit_block = emit_match.group(1)
             assignments = re.findall(r'([a-zA-Z0-9_]+)\s*=\s*([a-zA-Z0-9_.\-\[\]]+)', emit_block)
             if assignments:
-                data['emit_channels'] = [f"{k} = {v}" for k, v in assignments]
+                existing = data.get('emit_channels', [])
+                for k, v in assignments:
+                    emit_str = f"{k} = {v}"
+                    if emit_str not in existing:
+                        existing.append(emit_str)
+                data['emit_channels'] = existing
 
         match = re.search(r'^\s*workflow\s+[_a-zA-Z0-9]*\s*\{(.*)\}\s*$', body, re.DOTALL)
         if match: body = match.group(1)
@@ -145,6 +150,9 @@ class WorkflowBlock(BaseModel):
         assignments = re.findall(r'^[\s]*(?:def\s+)?([a-zA-Z0-9_]+)\s*=', self.body_code, re.MULTILINE)
         valid_vars.update(assignments)
       
+        process_calls = re.findall(r'\b([a-zA-Z0-9_]+)\s*\(', self.body_code)
+        valid_vars.update(process_calls)
+
         sets = re.findall(r'\.set\s*\{\s*([a-zA-Z0-9_]+)\s*\}', self.body_code)
         valid_vars.update(sets)
 
@@ -163,6 +171,16 @@ class WorkflowBlock(BaseModel):
                     f"was NEVER DEFINED. It is not in your take_channels and you did not assign it in the body_code."
                 )
         return self
+
+    @field_validator('emit_channels')
+    def validate_emit_format(cls, v):
+        for emit_str in v:
+            if '=' not in emit_str:
+                raise ValueError(
+                    f"STRICT EMIT FORMAT ERROR: '{emit_str}' is missing an assignment operator '='. "
+                    f"You MUST map the output like 'emitted_name = variable_name.property'"
+                )
+        return v
 
 class Entrypoint(BaseModel):
     body_code: str = Field(

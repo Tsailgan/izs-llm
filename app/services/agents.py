@@ -130,13 +130,12 @@ trimmed.multiMap {{
 * NO WORKFLOW WRAPPERS. In the body_code for workflows and the entrypoint DO NOT write workflow {{ ... }} or main. The Python rendering engine does this automatically. Just write the inner logic.
 * NO LOGIC IN INLINE PROCESSES. The inline_processes list is ONLY for raw bash scripts. Do not put Nextflow logic inside an inline process. Use sub_workflows for logic.
 
-# 3. VARIABLE SCOPING & SUB-WORKFLOWS
-* USE WHAT YOU TAKE. If you put a variable in take_channels, you MUST use it in the body_code.
-* NO UNNECESSARY EMITS. If a module is a terminal step and its outputs are not needed by the entrypoint or downstream workflows, DO NOT emit anything! Leave `emit_channels` empty.
-* NO HALLUCINATED OUTPUTS. Do not invent or guess process output names (e.g., `pangolin_out.lineage_report`). Only emit standard, proven outputs like `.consensus`, `.lineage`, or `.out`.
-* OUTPUTS. Add variable assignments to the emit_channels JSON list (e.g., `["consensus = bowtie_res.consensus"]`).
-* STRICT EMIT FORMAT. DO NOT put function calls in emit_channels. ONLY put variable assignments.
-* EMITTING ALL REQUIRED CHANNELS. If you define a channel in a sub-workflow and try to use it later, you MUST emit it!
+# 3. VARIABLE SCOPING, EMITS, & ARITY (MANDATORY)
+* MATCH THE CALL SIGNATURE (TAKES): A sub-workflow MUST take the exact number of arguments passed to it. Do not drop inputs even if they are unused in the body.
+* VOID WORKFLOWS (NO ASSIGNMENT): Many terminal tools (like `step_4TY_lineage__pangolin`, QC tools, or reporters) use `publishDir` and DO NOT emit data. If a tool doesn't emit anything, DO NOT assign it to a variable! Just call it directly (e.g., `step_4TY_lineage__pangolin(consensus)`).
+* TERMINAL WORKFLOWS DO NOT EMIT: If a sub-workflow is the final step of the pipeline, its `emit_channels` list MUST BE COMPLETELY EMPTY `[]`.
+* NO HALLUCINATED OUTPUTS: Never guess or invent process outputs (e.g., guessing `.lineage_report` for Pangolin). If a workflow is not terminal and you MUST emit, stick to standard proven outputs like `.consensus`, `.lineage`, `.assigned_species`, or `.out`.
+* STRICT EMIT FORMAT: If you do emit, DO NOT put function calls in `emit_channels`. ONLY put variable assignments.
 
 # 4. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
 Sub-workflows are isolated environments. They CANNOT see variables defined in the entrypoint. You MUST pass variables explicitly through take and emit channels.
@@ -180,9 +179,9 @@ Notice there are NO imports, proper `.set` usage, and NO take/emit keywords insi
 * You just call the sub-workflows and pass the channels between them.
 
 # 8. STRUCTURE EXPECTATIONS
-* globals: Define standard params and variables used in the pipeline.
+* globals: Define standard params and variables here. CRITICAL: If a global variable is a string or path, you MUST wrap it in quotes (e.g., `'NC_045512.2'` or `"${params.assets_dir}/..."`). Do not output raw unquoted strings!
 * inline_processes: Custom bash scripts NOT found in the RAG context.
-* sub_workflows: Reusable logic blocks. Use take_channels and emit_channels to pass data in and out. Make the pipeline modular here.
+* sub_workflows: Reusable logic blocks. Use take_channels and emit_channels. Leave `emit_channels` empty `[]` for terminal workflows.
 * entrypoint: The main execution block. Write your primary DSL2 logic directly inside body_code. Pass channels into sub-workflows explicitly.
 """
 
