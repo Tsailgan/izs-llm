@@ -138,7 +138,7 @@ If a sub-workflow receives a channel that was ALREADY joined by a previous modul
 * VOID WORKFLOWS (NO ASSIGNMENT): Many terminal tools (like `step_4TY_lineage__pangolin`, QC tools, or reporters) use `publishDir` and DO NOT emit data. If a tool doesn't emit anything, DO NOT assign it to a variable! Just call it directly (e.g., `step_4TY_lineage__pangolin(consensus)`).
 * TERMINAL WORKFLOWS DO NOT EMIT: If a sub-workflow is the final step of the pipeline, its `emit_channels` list MUST BE COMPLETELY EMPTY `[]`.
 * NO HALLUCINATED OUTPUTS: Never guess or invent process outputs (e.g., guessing `.lineage_report` for Pangolin). If a workflow is not terminal and you MUST emit, stick to standard proven outputs like `.consensus`, `.lineage`, `.assigned_species`, or `.out`.
-* STRICT EMIT FORMAT: If you do emit, DO NOT put function calls in `emit_channels`. ONLY put variable assignments.
+* STRICT EMIT FORMAT: DO NOT put function calls in `emit_channels`. You may emit a direct channel name (e.g., `"depleted_reads"`) or an assignment (e.g., `"consensus = bowtie_res.consensus"`).
 
 # 4. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
 Sub-workflows are isolated environments. They CANNOT see variables defined in the entrypoint. You MUST pass variables explicitly through take and emit channels.

@@ -117,10 +117,12 @@ class WorkflowBlock(BaseModel):
     @field_validator('emit_channels')
     def validate_emit_format(cls, v):
         for emit_str in v:
-            if '=' not in emit_str:
+            if '(' in emit_str or ')' in emit_str:
                 raise ValueError(
-                    f"STRICT EMIT FORMAT ERROR: '{emit_str}' is missing an assignment operator '='. "
-                    f"You MUST map the output like 'emitted_name = variable_name.property'"
+                    f"STRICT EMIT FORMAT ERROR: '{emit_str}' contains parenthesis. "
+                    f"DO NOT put function calls in the emit channels.\n"
+                    f"CRITICAL REPAIR INSTRUCTION: Assign the process to a variable in your body_code, "
+                    f"and only emit the variable name (e.g., 'depleted_reads') or property (e.g., 'consensus = out.consensus')."
                 )
         return v
 
