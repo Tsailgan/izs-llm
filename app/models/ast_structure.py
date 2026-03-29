@@ -50,6 +50,21 @@ class GlobalDef(BaseModel):
     name: str = Field(description="The variable name.")
     value: str = Field(description="The string value.")
 
+    @field_validator('value')
+    def forbid_active_channels(cls, v):
+        """Blocks the LLM from putting getSingleInput() or getReference() in the globals block."""
+        if '(' in v and ')' in v and any(kw in v for kw in ['get', 'param', 'Channel']):
+            raise ValueError(
+                f"\n=======================================================\n"
+                f"GLOBAL SCOPE ERROR: You placed an active function '{v}' in the `globals` list.\n"
+                f"Active data channels WILL CRASH Nextflow if defined globally.\n"
+                f"CRITICAL REPAIR INSTRUCTION: \n"
+                f"1. DELETE this variable from the `globals` array.\n"
+                f"2. Move '{v}' down into the `entrypoint` body_code!\n"
+                f"=======================================================\n"
+            )
+        return v
+
 class InlineProcess(BaseModel):
     name: str = Field(description="The name of the custom process.")
     container: Optional[str] = None
@@ -129,25 +144,24 @@ class WorkflowBlock(BaseModel):
     @field_validator('emit_channels')
     def forbid_void_emits(cls, v):
         """Strictly prevents the LLM from trying to emit outputs from known Void tools."""
-        
-        # Comprehensive list of tools that do not have an emit: block in cohesive-ngsmanager
         void_keywords = [
-            'pangolin', 'lineage_report', 
-            'fastqc', 'quast', 'nanoplot', 
-            'centrifuge', 'confindr', 'mash', 
-            'resfinder', 'staramr', 'prokka', 
+            'pangolin', 'lineage_report', 'fastqc', 'quast', 'nanoplot', 'centrifuge', 
+            'confindr', 'mash', 'resfinder', 'staramr', 'prokka', 
             'mlst', 'chewbbaca', 'flaa'
         ]
-        
         for emit_str in v:
+            lower_str = emit_str.lower()
             for kw in void_keywords:
-                rhs = emit_str.split('=')[-1].strip().lower()
-                
-                if kw in rhs:
+                if kw in lower_str:
                     raise ValueError(
-                        f"HALLUCINATION ERROR: You cannot emit '{emit_str}'. "
-                        f"Tools like {kw.capitalize()} are VOID tools. They write directly to the disk via `publishDir` "
-                        f"and produce no emit channels. You MUST completely remove this from `emit_channels`."
+                        f"\n=======================================================\n"
+                        f"FATAL ERROR: YOU ARE TRAPPED IN A HALLUCINATION LOOP!\n"
+                        f"You are trying to emit '{emit_str}' which is related to '{kw}'.\n"
+                        f"'{kw.upper()}' IS A VOID TOOL. IT HAS NO OUTPUTS TO EMIT.\n"
+                        f"1. REMOVE '{emit_str}' from `emit_channels` completely.\n"
+                        f"2. DO NOT assign {kw} to a variable in your body_code. (WRONG: `res = {kw}(...)` -> RIGHT: `{kw}(...)`)\n"
+                        f"3. DO NOT rename the variable to trick the validator. JUST DELETE THE EMIT.\n"
+                        f"=======================================================\n"
                     )
         return v
 
@@ -241,6 +255,25 @@ class WorkflowBlock(BaseModel):
                     f"it DOES NOT output a channel. You MUST completely REMOVE '{emit_str}' from your `emit_channels` list.\n"
                     f"2. DO NOT try to assign Void tools to variables (e.g. do not write `res = pangolin()`). Just call the process directly.\n"
                     f"3. Do not invent or guess variable names to make this error go away. Delete the emit entirely."
+                )
+        return self
+
+    @model_validator(mode='after')
+    def enforce_host_depletion_shape(self):
+        """Forces the LLM to use .map for Host Depletion instead of .multiMap"""
+        if not self.body_code:
+            return self
+            
+        if 'step_1PP_hostdepl' in self.body_code and '.cross(' in self.body_code:
+            if '.multiMap' in self.body_code:
+                raise ValueError(
+                    f"\n=======================================================\n"
+                    f"DATA SHAPING ERROR in '{self.name}': You used `.multiMap` for Host Depletion.\n"
+                    f"Host depletion tools (`step_1PP_hostdepl__*`) require a SINGLE FLAT TUPLE.\n"
+                    f"CRITICAL REPAIR INSTRUCTION:\n"
+                    f"Replace your `.multiMap {{ ... }}` block entirely with:\n"
+                    f"`.map {{ [ it[0][0], it[0][1], it[1][1] ] }}`\n"
+                    f"=======================================================\n"
                 )
         return self
 
