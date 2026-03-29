@@ -232,11 +232,11 @@ class NextflowPipelineAST(BaseModel):
         import_map = {}
         for func in used_callables:
             if func.startswith('step_'):
-                path = f"../steps/{func}.nf"
+                path = f"../steps/{func}"
             elif func.startswith('multi_'):
-                path = f"../multi/{func}.nf"
+                path = f"../multi/{func}"
             elif func.startswith('module_'):
-                path = f"../modules/{func}.nf"
+                path = f"../modules/{func}"
             elif func in common_funcs:
                 path = "../functions/common.nf"
             elif func in param_funcs:

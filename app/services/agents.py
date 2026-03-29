@@ -52,33 +52,83 @@ Your task is to write a strict production-ready Nextflow DSL2 pipeline based on 
 # GOAL
 You must output a JSON object matching the NextflowPipelineAST schema. 
 Instead of building complex JSON logic trees you will write RAW NEXTFLOW GROOVY CODE for the body_code fields.
+NOTE: Do not worry about the `imports` array. The Python system will auto-generate it for you. Leave it empty.
 
-# 1. STRICT DSL2 AND FORMATTING RULES
-* IMPORTS ARE CRITICAL. You MUST import every step_ multi_ or module_ tool you use, AND every helper function (like getSingleInput, getAssembly). 
-  * NEVER use nf-core paths. 
-  * Use exact local paths based on the prefix ../steps/<name> ../multi/<name> ../modules/<name> or ../functions/<name>.nf.
-  * DO NOT import the same function twice from different files.
+# 1. COHESIVE-NGSMANAGER NATIVE IDIOMS (THE RULEBOOK)
+You MUST apply the correct data-shaping idiom based on the biological step you are writing. Study these carefully:
+
+* THE "MAPPING & DRAFTING" IDIOM (References):
+When crossing reads/assembly with a Reference (e.g., Bowtie, Minimap2, Ivar), you MUST extract the reference path using `it[1][1..3]`.
+```groovy
+reads.cross(reference) {{ extractKey(it) }}.multiMap {{ 
+    reads: it[0]        // riscd, reads
+    refs:  it[1][1..3]  // riscd, code, path
+}}.set {{ sync_data }}
+```
+* THE "TRIMMING & QC" IDIOM:
+When comparing raw vs trimmed (or kraken vs trimmed), use direct assignment.
+```groovy
+readsCheckInput = rawreads.cross(trimmed) {{ extractKey(it) }}.multiMap {{ 
+    rawreads: it[0]; trimmed: it[1] 
+}}      
+sample_reads_check(readsCheckInput.rawreads, readsCheckInput.trimmed)
+```
+* THE "DOUBLE CROSS" IDIOM (Complex Annotation/Filtering):
+If you chain two .cross() operations, Nextflow nests the tuples. You MUST handle the deep indices correctly!
+```groovy
+assembled.cross(reference) {{ extractKey(it) }}.cross(abricateDatabase) {{ extractKey(it) }}.multiMap {{ 
+    assembly: it[0][0][0..1]  // Deep nested extraction
+    reference: it[0][1]
+    abricateDatabase: it[1]
+}}.set {{ cARA }}
+```
+
+* THE "BRANCH, DEPLETE, & MIX" IDIOM (Host Depletion):
+To route data based on host presence, map it, branch it, process the 'with_host' branch, and mix it back.
+```groovy
+trimmedReads.cross(host) {{ extractKey(it) }}.map {{ [ it[0][0], it[0][1], it[1][1] ] }}
+    .branch {{ with_host: it[1][1]; without_host: true }}.set {{ branchedTrimmed }}
+depleted = step_1PP_hostdepl__bowtie(branchedTrimmed.with_host)
+branchedTrimmed.without_host.mix(depleted).map {{ it[0,1] }}.set {{ denovoInput }}
+```
+
+* THE "COVERAGE & PIPING" IDIOM:
+For depth/coverage tracking, use {{ extractDsRef(it) }} or custom closures. Use the inline pipe | for groupTuple and plots.
+```groovy
+coverage_minmax.out.coverage_depth | coverage_plot
+coverage.cross(consensus) {{ extractDsRef(it) }}.map {{ [ it[0][0], it[1][1], it[0][1] ] }}.set {{ cov_ref }}
+crossedChecks = extra.cross(basic) {{ it[0] + "-" + it[1] }}.map {{ [ it[0][0], it[0][1], it[0][2], it[1][2] ] }}
+reads.cross(consensus | groupTuple) {{ extractKey(it) }}.map {{ [ it[0][0], it[1][1], it[1][2] ] }}.set {{ agg }}
+```
+
+* THE "PROKKA INJECTION" IDIOM:
+When calling Prokka or tools needing constant dummy data, use .map to inject lists containing 'Bacteria', '-', and getEmpty().
+```groovy
+step_4AN_genes__prokka(assembly.map{{ [ it[0], it[1], 'Bacteria', '-', '-', getEmpty() ] }})
+```
+
+* THE "SNIPPY & PLASMIDS" IDIOM:
+Use .combine() for Snippy multi-alignments or when attaching .flatten() data.
+```groovy
+// Snippy
+reads.combine(reference).multiMap {{ reads: it[0..1]; reference: it[2..4] }}.set {{ input }}
+// Plasmids
+branched.riscd.combine(branched.plasmids.flatten())
+```
+
+# 2. STRICT DSL2 AND FORMATTING RULES
 * NO WORKFLOW WRAPPERS. In the body_code for workflows and the entrypoint DO NOT write workflow {{ ... }} or main. The Python rendering engine does this automatically. Just write the inner logic.
 * NO LOGIC IN INLINE PROCESSES. The inline_processes list is ONLY for raw bash scripts. Do not put Nextflow logic inside an inline process. Use sub_workflows for logic.
 
-# 2. NEXTFLOW DATA FLOW AND SYNTAX
+# 3. NEXTFLOW DATA FLOW AND SYNTAX & STRICT SHAPING RULES
 Nextflow is a reactive dataflow programming language. Channels act as asynchronous queues.
 * PROCESS OUTPUTS. When you call a process or sub-workflow assign it to a variable. To access multiple outputs you MUST use the .out property or the specific emitted name.
-  * Right: bowtie_res = step_2AS_mapping__bowtie(reads, refs) -> access via bowtie_res.consensus
-  * Wrong: Just calling step_2AS_mapping__bowtie(reads, refs) and hoping it auto-assigns globally.
-* THE .set TRAP. Do NOT mix standard Groovy assignment with Nextflow's .set {{ }} operator. Pick one.
-  * Right: ch_annotated = ch_in.cross(refs).map {{ it }}
-  * Wrong: def ch_annotated = ch_in.cross(refs).set {{ annotated_data }}
+* NATIVE ASSIGNMENT. Use cohesive's native `.set {{ }}` style or standard direct assignment. Do NOT mix `def` with `.set`.
 * ACCESSING PARAMETERS. To check a global parameter, use standard params.variable syntax (e.g., `if (!params.skip_bestref_mapping)`) UNLESS the user explicitly requests a custom helper function like param('variable').
-* DATA SHAPING IS CRITICAL (HARD OVERRIDE OF LINEAR MODE). Even if you are in "Linear Mode", you CANNOT simply pass a `.cross()` output directly into a process. 
-  - A `.cross()` creates a nested tuple: `[[id, val1], [id, val2]]`. Processes WILL CRASH if given this.
-  - Every time you use `.cross()`, you MUST chain a `.map { ... }` or `.multiMap { ... }` to flatten the tuple into `[id, val1, val2]` BEFORE passing it to a process.
-  - NEVER put channel operations inline inside a process call (e.g., WRONG: `my_process(ch.cross(ref))`).
-  - ALWAYS prepare the data on a separate line and assign it to a variable.
-  - Example Map: `ch_ready = reads.cross(host) {{ extractKey(it) }}.map {{ [it[0][0], it[0][1], it[1][1]] }}`
-  - Example MultiMap: `ch_split = reads.cross(ref) {{ extractKey(it) }}.multiMap {{ clean: it[0][0..1]; refs: it[1][1..3] }}`
-  
-# 3. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
+* STRICT DATA SHAPING (MANDATORY). NEVER pass a `.cross()` or `.combine()` output directly into a process argument (e.g., WRONG: `process(reads.cross(refs))`). 
+  - ALWAYS put the `.cross()` on a separate line, chain it with `.map`, `.multiMap`, or `.set`, and pass the shaped variable to the process.
+
+# 4. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
 Sub-workflows are isolated environments. They CANNOT see variables defined in the entrypoint. You MUST pass variables explicitly through take and emit channels.
 * INPUTS. If a sub-workflow needs data add the variable names to the take_channels JSON list. 
 * USE WHAT YOU TAKE. If you put a variable in take_channels, you MUST use it in the body_code. If a workflow doesn't need a variable, do not take it!
@@ -92,39 +142,34 @@ Sub-workflows are isolated environments. They CANNOT see variables defined in th
 * EMITTING MODIFIED CHANNELS. If you use operators like .cross or .map and save the result to a new variable (like prepared_data) you MUST emit that new variable. Do not emit the raw input channel.
 * NO MANUAL KEYWORDS. DO NOT write manual take or emit blocks inside your body_code. The JSON fields handle this for you.
 
-# 4. JSON OUTPUT EXAMPLE (CRITICAL)
-Notice how helper functions are explicitly imported, and there are NO take and emit keywords inside the body_code!
+# 5. JSON OUTPUT EXAMPLE (CRITICAL)
+Notice there are NO imports, proper `.set` usage, and NO take/emit keywords inside the body_code!
 
 ```json
 {{
-  "imports": [
-    {{ "module_path": "../functions/parameters.nf", "functions": ["getSingleInput", "getReference"] }},
-    {{ "module_path": "../steps/step_2AS_mapping__bowtie", "functions": ["step_2AS_mapping__bowtie"] }}
-  ],
   "sub_workflows": [
     {{
-      "name": "run_mapping",
-      "take_channels": ["reads", "refs"],
-      "emit_channels": ["consensus_bowtie = bowtie_res.consensus"],
-      "body_code": "bowtie_res = step_2AS_mapping__bowtie(reads, refs)"
+      "name": "module_typing",
+      "take_channels": ["reads", "assembly"],
+      "emit_channels": ["typing_result = typing_res"],
+      "body_code": "reads.cross(assembly) {{ extractKey(it) }}.multiMap {{ \\n  reads: it[0]\\n  assembly: it[1]\\n}}.set {{ sync_data }}\\ntyping_res = module_typing_bacteria(sync_data.reads, sync_data.assembly)"
     }}
   ]
 }}
 ```
 
-# 5. MODULAR PIPELINE DESIGN (MANDATORY)
+# 6. MODULAR PIPELINE DESIGN (MANDATORY)
 * Do not write one single big workflow but DO NOT shatter the pipeline into tiny fragmented sub-workflows.
 * Group related biological steps into cohesive module workflows like module_deplete_and_map or module_comprehensive_profiling.
 * Perform your channel joining (.cross) mapping (.map) and branching (.multiMap) immediately before calling the processes that need that data. Keep this data shaping inside the same sub-workflow as the processes. Do not isolate preparation steps if it breaks the data flow.
 * The entrypoint should serve ONLY as the master orchestrator. It should pull the inputs using the correct specific functions requested by the user (e.g., getAssembly(), getTrimmedReads(), getSingleInput()) and connect the sub-workflows together.
 
-# 6. THE ENTRYPOINT RULES
+# 7. THE ENTRYPOINT RULES
 * The entrypoint is the main anonymous workflow that triggers the whole pipeline.
 * IT CANNOT EMIT ANYTHING. It is the final destination of the pipeline. Do not try to write an emit block or output variables from the entrypoint.
 * You just call the sub-workflows and pass the channels between them.
 
-# 7. STRUCTURE EXPECTATIONS
-* imports: List the tools to include with their correct local paths. Don't forget helper functions!
+# 8. STRUCTURE EXPECTATIONS
 * globals: Define standard params and variables used in the pipeline.
 * inline_processes: Custom bash scripts NOT found in the RAG context.
 * sub_workflows: Reusable logic blocks. Use take_channels and emit_channels to pass data in and out. Make the pipeline modular here.
