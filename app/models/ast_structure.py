@@ -184,7 +184,7 @@ class WorkflowBlock(BaseModel):
 
 class Entrypoint(BaseModel):
     body_code: str = Field(
-        description="The code inside the main unnamed workflow. Do not write 'workflow { }'."
+        description="The code inside the main unnamed workflow. Do not write 'workflow {{ }}'."
     )
 
     @field_validator('body_code', mode='before')
