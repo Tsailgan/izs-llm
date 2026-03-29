@@ -260,19 +260,23 @@ class WorkflowBlock(BaseModel):
 
     @model_validator(mode='after')
     def enforce_host_depletion_shape(self):
-        """Forces the LLM to use .map for Host Depletion instead of .multiMap"""
+        """Traces the specific variable passed to Host Depletion to ensure it uses .map"""
         if not self.body_code:
             return self
+
+        host_calls = re.findall(r'step_1PP_hostdepl__[a-zA-Z0-9_]+\s*\(([a-zA-Z0-9_]+)\)', self.body_code)
+        
+        for var_name in host_calls:
+            bad_pattern = rf'\.multiMap\s*\{{[^}}]*\}}\s*\.set\s*\{{\s*{var_name}\s*\}}'
             
-        if 'step_1PP_hostdepl' in self.body_code and '.cross(' in self.body_code:
-            if '.multiMap' in self.body_code:
+            if re.search(bad_pattern, self.body_code):
                 raise ValueError(
                     f"\n=======================================================\n"
-                    f"DATA SHAPING ERROR in '{self.name}': You used `.multiMap` for Host Depletion.\n"
+                    f"DATA SHAPING ERROR in '{self.name}': You used `.multiMap` to prepare the '{var_name}' channel for Host Depletion.\n"
                     f"Host depletion tools (`step_1PP_hostdepl__*`) require a SINGLE FLAT TUPLE.\n"
                     f"CRITICAL REPAIR INSTRUCTION:\n"
-                    f"Replace your `.multiMap {{ ... }}` block entirely with:\n"
-                    f"`.map {{ [ it[0][0], it[0][1], it[1][1] ] }}`\n"
+                    f"Change the preparation of '{var_name}' to use `.map` instead of `.multiMap`:\n"
+                    f"`.map {{ [ it[0][0], it[0][1], it[1][1] ] }}.set {{ {var_name} }}`\n"
                     f"=======================================================\n"
                 )
         return self
