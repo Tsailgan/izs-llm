@@ -319,6 +319,34 @@ class WorkflowBlock(BaseModel):
                 )
         return self
 
+    @model_validator(mode='after')
+    def forbid_void_tool_assignment(self):
+        """Physically blocks the LLM from assigning Void tools to variables using '='."""
+        if not self.body_code:
+            return self
+
+        void_keywords = [
+            'pangolin', 'fastqc', 'quast', 'nanoplot', 'centrifuge', 
+            'confindr', 'mash', 'resfinder', 'staramr', 'prokka', 
+            'mlst', 'chewbbaca', 'flaa'
+        ]
+
+        for kw in void_keywords:
+            bad_pattern = rf'\b[a-zA-Z0-9_]+\s*=\s*(?:step_|multi_|module_)[a-zA-Z0-9_]*{kw}[a-zA-Z0-9_]*\s*\('
+            
+            if re.search(bad_pattern, self.body_code.lower()):
+                raise ValueError(
+                    f"\n=======================================================\n"
+                    f"VOID TOOL ERROR in '{self.name}': You assigned a VOID TOOL ('{kw}') to a variable.\n"
+                    f"Void tools use `publishDir` and return NOTHING. Assigning them to a variable causes a runtime crash.\n"
+                    f"CRITICAL REPAIR INSTRUCTION:\n"
+                    f"1. Remove the `variable = ` assignment completely.\n"
+                    f"2. Just call the process directly on its own line: `step_..._{kw}(...)`\n"
+                    f"3. Make sure you delete that variable from your `emit_channels` entirely!\n"
+                    f"=======================================================\n"
+                )
+        return self
+
 class Entrypoint(BaseModel):
     body_code: str = Field(
         description="The code inside the main unnamed workflow. Do not write 'workflow {{ }}'."
