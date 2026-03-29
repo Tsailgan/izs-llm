@@ -114,6 +114,41 @@ class WorkflowBlock(BaseModel):
         data['body_code'] = body.strip()
         return data
 
+    @field_validator('emit_channels')
+    def validate_emit_format(cls, v):
+        for emit_str in v:
+            if '=' not in emit_str:
+                raise ValueError(
+                    f"STRICT EMIT FORMAT ERROR: '{emit_str}' is missing an assignment operator '='. "
+                    f"You MUST map the output like 'emitted_name = variable_name.property'"
+                )
+        return v
+
+    @field_validator('emit_channels')
+    def forbid_void_emits(cls, v):
+        """Strictly prevents the LLM from trying to emit outputs from known Void tools."""
+        
+        # Comprehensive list of tools that do not have an emit: block in cohesive-ngsmanager
+        void_keywords = [
+            'pangolin', 'lineage_report', 
+            'fastqc', 'quast', 'nanoplot', 
+            'centrifuge', 'confindr', 'mash', 
+            'resfinder', 'staramr', 'prokka', 
+            'mlst', 'chewbbaca', 'flaa'
+        ]
+        
+        for emit_str in v:
+            for kw in void_keywords:
+                rhs = emit_str.split('=')[-1].strip().lower()
+                
+                if kw in rhs:
+                    raise ValueError(
+                        f"HALLUCINATION ERROR: You cannot emit '{emit_str}'. "
+                        f"Tools like {kw.capitalize()} are VOID tools. They write directly to the disk via `publishDir` "
+                        f"and produce no emit channels. You MUST completely remove this from `emit_channels`."
+                    )
+        return v
+
     @model_validator(mode='after')
     def enforce_take_channel_usage(self):
         if not self.take_channels:
@@ -140,6 +175,37 @@ class WorkflowBlock(BaseModel):
         return self
 
     @model_validator(mode='after')
+    def enforce_strict_data_shaping(self):
+        """Strictly enforces that the LLM manually shapes data and never uses inline channel joins."""
+        if not self.body_code:
+            return self
+            
+        process_calls = re.finditer(r'\b(?:step_|multi_|module_|medaka|samtools|coverage|aggregate|staramr)[a-zA-Z0-9_]*\s*\(([^)]+)\)', self.body_code)
+        for match in process_calls:
+            args = match.group(1)
+            # Allowed: | groupTuple. Forbidden: .cross, .combine
+            if '.cross' in args or '.combine' in args:
+                raise ValueError(
+                    f"SYNTAX ERROR in '{self.name}': Inline channel joins are forbidden.\n"
+                    f"Found: '{match.group(0)}'\n"
+                    f"You MUST perform .cross() or .combine() on a separate line, "
+                    f"flatten it with .map or .multiMap, assign it to a variable, and pass ONLY the variable."
+                )
+
+        ops_matches = re.finditer(r'\.(cross|combine)\s*\([^)]*\)', self.body_code)
+        for match in ops_matches:
+            post_op_text = self.body_code[match.end():]
+            chain_pattern = re.compile(r'^\s*(?:\{[^}]*\}\s*)?\.(map|multiMap|set|branch)\b')
+            if not chain_pattern.search(post_op_text):
+                raise ValueError(
+                    f"DATA SHAPING ERROR in '{self.name}': A '.{match.group(1)}()' operation was found without being flattened.\n"
+                    f"In cohesive-ngsmanager, you MUST chain '.map {{ ... }}', '.multiMap {{ ... }}', or '.set {{ ... }}' "
+                    f"after channel joins to ensure the tuple structure is correct."
+                )
+
+        return self
+
+    @model_validator(mode='after')
     def enforce_variable_existence(self):
         """Ensures that any variable emitted actually exists in the take_channels or body_code."""
         if not self.body_code:
@@ -149,12 +215,12 @@ class WorkflowBlock(BaseModel):
 
         assignments = re.findall(r'^[\s]*(?:def\s+)?([a-zA-Z0-9_]+)\s*=', self.body_code, re.MULTILINE)
         valid_vars.update(assignments)
-      
-        process_calls = re.findall(r'\b([a-zA-Z0-9_]+)\s*\(', self.body_code)
-        valid_vars.update(process_calls)
-
+       
         sets = re.findall(r'\.set\s*\{\s*([a-zA-Z0-9_]+)\s*\}', self.body_code)
         valid_vars.update(sets)
+
+        process_calls = re.findall(r'\b([a-zA-Z0-9_]+)\s*\(', self.body_code)
+        valid_vars.update(process_calls)
 
         for emit_str in self.emit_channels:
             rhs = emit_str.split('=')[-1].strip()
@@ -167,20 +233,14 @@ class WorkflowBlock(BaseModel):
             if base_var not in valid_vars:
                 raise ValueError(
                     f"HALLUCINATION DETECTED in workflow '{self.name}'. "
-                    f"You are trying to emit '{emit_str}' but the variable '{base_var}' "
-                    f"was NEVER DEFINED. It is not in your take_channels and you did not assign it in the body_code."
+                    f"You are trying to emit '{emit_str}' but the variable '{base_var}' was NEVER DEFINED.\n\n"
+                    f"CRITICAL REPAIR INSTRUCTION:\n"
+                    f"1. If '{base_var}' is supposed to be the output of a Void tool (like Pangolin, FastQC, or reporting tools that use publishDir), "
+                    f"it DOES NOT output a channel. You MUST completely REMOVE '{emit_str}' from your `emit_channels` list.\n"
+                    f"2. DO NOT try to assign Void tools to variables (e.g. do not write `res = pangolin()`). Just call the process directly.\n"
+                    f"3. Do not invent or guess variable names to make this error go away. Delete the emit entirely."
                 )
         return self
-
-    @field_validator('emit_channels')
-    def validate_emit_format(cls, v):
-        for emit_str in v:
-            if '=' not in emit_str:
-                raise ValueError(
-                    f"STRICT EMIT FORMAT ERROR: '{emit_str}' is missing an assignment operator '='. "
-                    f"You MUST map the output like 'emitted_name = variable_name.property'"
-                )
-        return v
 
 class Entrypoint(BaseModel):
     body_code: str = Field(

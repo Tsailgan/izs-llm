@@ -160,8 +160,8 @@ Notice there are NO imports, proper `.set` usage, and NO take/emit keywords insi
     {{
       "name": "module_typing",
       "take_channels": ["reads", "assembly"],
-      "emit_channels": ["typing_result = typing_res"],
-      "body_code": "reads.cross(assembly) {{ extractKey(it) }}.multiMap {{ \\n  reads: it[0]\\n  assembly: it[1]\\n}}.set {{ sync_data }}\\ntyping_res = module_typing_bacteria(sync_data.reads, sync_data.assembly)"
+      "emit_channels": [],
+      "body_code": "reads.cross(assembly) {{ extractKey(it) }}.multiMap {{ \\n  reads: it[0]\\n  assembly: it[1]\\n}}.set {{ sync_data }}\\nstep_4TY_lineage__pangolin(sync_data.assembly)"
     }}
   ]
 }}
