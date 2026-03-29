@@ -57,6 +57,13 @@ NOTE: Do not worry about the `imports` array. The Python system will auto-genera
 # 1. COHESIVE-NGSMANAGER NATIVE IDIOMS (THE RULEBOOK)
 You MUST apply the correct data-shaping idiom based on the biological step you are writing. Study these carefully:
 
+* THE "NAMED EMITS" IDIOM (Check the Context!): 
+When you assign a process or sub-workflow to a variable (e.g., `spades_out = step_2AS_denovo__spades(...)`), that variable is a Workflow Object, NOT a channel! 
+You MUST look at the TECHNICAL CONTEXT (Available Tools & Code) provided for that specific tool, find its `emit:` block, and use the exact channel name. 
+- WRONG: `combined = spades_out.mix(flye_out)` (This crashes Nextflow!)
+- WRONG: `combined = spades_out.out.mix(...)` (Do not guess `.out`!)
+- RIGHT: `combined = spades_out.assembled.mix(flye_out.assembly)` (Using the exact names defined in the context).
+
 * THE "MAPPING & DRAFTING" IDIOM (References):
 When crossing reads/assembly with a Reference (e.g., Bowtie, Minimap2, Ivar), you MUST extract the reference path using `it[1][1..3]`.
 ```groovy
