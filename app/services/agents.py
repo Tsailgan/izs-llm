@@ -126,6 +126,9 @@ trimmed.multiMap {{
 }}.set {{ trAndRef }}
 ```
 
+* THE "PRE-SHAPED DATA" IDIOM (Chain of Custody):
+If a sub-workflow receives a channel that was ALREADY joined by a previous module or `prepare_inputs` block, DO NOT use `.cross()` or `.combine()` again! The data is already synchronized. Just pass it directly to the process or use `.map{{}}` to extract what you need.
+
 # 2. STRICT DSL2 AND FORMATTING RULES
 * NO WORKFLOW WRAPPERS. In the body_code for workflows and the entrypoint DO NOT write workflow {{ ... }} or main. The Python rendering engine does this automatically. Just write the inner logic.
 * NO LOGIC IN INLINE PROCESSES. The inline_processes list is ONLY for raw bash scripts. Do not put Nextflow logic inside an inline process. Use sub_workflows for logic.
@@ -170,6 +173,8 @@ Notice there are NO imports, proper `.set` usage, and NO take/emit keywords insi
 # 6. MODULAR PIPELINE DESIGN (MANDATORY)
 * Do not write one single big workflow but DO NOT shatter the pipeline into tiny fragmented sub-workflows.
 * Group related biological steps into cohesive module workflows like module_deplete_and_map or module_comprehensive_profiling.
+* AVOID DOUBLE SHAPING: You must track the state of your channels. If Workflow A crosses `reads` and `refs` and passes the combined result to Workflow B, Workflow B MUST NOT cross them a second time.
+* LOCAL VS GLOBAL SHAPING: You may shape data locally inside a subworkflow, OR you may use a `prepare_inputs` workflow to shape data and pass the tuples downstream. Pick ONE strategy per data stream and stick to it. Do not redundantly shape data.
 * Perform your channel joining (.cross) mapping (.map) and branching (.multiMap) immediately before calling the processes that need that data. Keep this data shaping inside the same sub-workflow as the processes. Do not isolate preparation steps if it breaks the data flow.
 * The entrypoint should serve ONLY as the master orchestrator. It should pull the inputs using the correct specific functions requested by the user (e.g., getAssembly(), getTrimmedReads(), getSingleInput()) and connect the sub-workflows together.
 
