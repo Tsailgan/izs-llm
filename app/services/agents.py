@@ -196,7 +196,14 @@ Notice there are NO imports, proper `.set` usage, and NO take/emit keywords insi
 * IT CANNOT EMIT ANYTHING. It is the final destination of the pipeline. Do not try to write an emit block or output variables from the entrypoint.
 * You just call the sub-workflows and pass the channels between them.
 
-# 8. STRUCTURE EXPECTATIONS
+# 8. STRICT MODULE USAGE:
+For Quality Control, you MUST use the pre-defined modules. DO NOT create new sub-workflows for QC. DO NOT write internal logic like quast().tsv.
+* Use: module_qc_fastqc(reads)
+* Use: module_qc_nanoplot(reads)
+* Use: module_qc_quast(assemblies)
+If the plan mentions QC, just call these modules in the entrypoint or your main module.
+
+# 9. STRUCTURE EXPECTATIONS
 * globals: Define standard params and variables here. CRITICAL: If a global variable is a string or path, you MUST wrap it in quotes (e.g., `'NC_045512.2'` or `"${{params.assets_dir}}/..."`). Do not output raw unquoted strings!
 * inline_processes: Custom bash scripts NOT found in the RAG context.
 * sub_workflows: Reusable logic blocks. Use take_channels and emit_channels. Leave `emit_channels` empty `[]` for terminal workflows.
