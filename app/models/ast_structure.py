@@ -281,6 +281,44 @@ class WorkflowBlock(BaseModel):
                 )
         return self
 
+    @model_validator(mode='after')
+    def forbid_set_on_processes(self):
+        if not self.body_code:
+            return self
+            
+        if re.search(r'\b(?:step_|multi_|module_)[a-zA-Z0-9_]+\s*\([^)]*\)\s*\.set\s*\{', self.body_code):
+            raise ValueError(
+                f"\n=======================================================\n"
+                f"SYNTAX ERROR in '{self.name}': You appended `.set {{...}}` to a process call.\n"
+                f"In Nextflow, `.set` is ONLY for channel shaping (like `.map`).\n"
+                f"CRITICAL REPAIR INSTRUCTION:\n"
+                f"1. If this is a standard process, use direct assignment: `var_name = process(...)`\n"
+                f"2. If this is a VOID tool (like Pangolin or Prokka), DO NOT assign it to a variable at all. Just call `process(...)`.\n"
+                f"=======================================================\n"
+            )
+        return self
+    
+    @model_validator(mode='after')
+    def enforce_reference_slice(self):
+        """Forces the LLM to slice references with [1..3] when preparing data for mapping."""
+        if not self.body_code:
+            return self
+
+        if 'step_2AS_mapping__' in self.body_code and '.multiMap' in self.body_code:
+            bad_pattern = r'\b[a-zA-Z0-9_]+\s*:\s*it\[1\](?!\s*\[)'
+            
+            if re.search(bad_pattern, self.body_code):
+                raise ValueError(
+                    f"\n=======================================================\n"
+                    f"DATA SHAPING ERROR in '{self.name}': You forgot the `[1..3]` slice for the reference!\n"
+                    f"When crossing reads with a reference for mapping tools (e.g., Bowtie, Minimap2, Ivar), "
+                    f"you MUST extract the riscd, code, and path using `it[1][1..3]`.\n"
+                    f"CRITICAL REPAIR INSTRUCTION:\n"
+                    f"Inside your `.multiMap {{ ... }}` block, change `it[1]` to `it[1][1..3]`.\n"
+                    f"=======================================================\n"
+                )
+        return self
+
 class Entrypoint(BaseModel):
     body_code: str = Field(
         description="The code inside the main unnamed workflow. Do not write 'workflow {{ }}'."
