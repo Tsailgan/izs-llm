@@ -65,6 +65,21 @@ reads.cross(reference) {{ extractKey(it) }}.multiMap {{
     refs:  it[1][1..3]  // riscd, code, path
 }}.set {{ sync_data }}
 ```
+* THE "HOST DEPLETION" IDIOM:
+Host depletion tools require a single flat tuple [riscd, reads, host]. You MUST use .map, NEVER .multiMap!
+If routing based on host presence, branch and mix:
+```groovy
+trimmedReads.cross(host) {{ extractKey(it) }}.map {{ [ it[0][0], it[0][1], it[1][1] ] }}
+    .branch {{ with_host: it[1][1]; without_host: true }}.set {{ branchedTrimmed }}
+depleted = step_1PP_hostdepl__bowtie(branchedTrimmed.with_host)
+branchedTrimmed.without_host.mix(depleted).map {{ it[0,1] }}.set {{ denovoInput }}
+```
+If just depleting everything:
+```groovy
+reads.cross(host) {{ extractKey(it) }}.map {{ [ it[0][0], it[0][1], it[1][1] ] }}.set {{ prep_host }}
+depleted = step_1PP_hostdepl__bowtie(prep_host)
+```
+
 * THE "TRIMMING & QC" IDIOM:
 When comparing raw vs trimmed (or kraken vs trimmed), use direct assignment.
 ```groovy
@@ -83,14 +98,8 @@ assembled.cross(reference) {{ extractKey(it) }}.cross(abricateDatabase) {{ extra
 }}.set {{ cARA }}
 ```
 
-* THE "BRANCH, DEPLETE, & MIX" IDIOM (Host Depletion):
-To route data based on host presence, map it, branch it, process the 'with_host' branch, and mix it back.
-```groovy
-trimmedReads.cross(host) {{ extractKey(it) }}.map {{ [ it[0][0], it[0][1], it[1][1] ] }}
-    .branch {{ with_host: it[1][1]; without_host: true }}.set {{ branchedTrimmed }}
-depleted = step_1PP_hostdepl__bowtie(branchedTrimmed.with_host)
-branchedTrimmed.without_host.mix(depleted).map {{ it[0,1] }}.set {{ denovoInput }}
-```
+* THE "PRE-SHAPED DATA" IDIOM (Chain of Custody):
+If a sub-workflow receives a channel that was ALREADY joined by a previous module, DO NOT use .cross() or .combine() again! The data is already synchronized. Just pass it directly to the process.
 
 * THE "COVERAGE & PIPING" IDIOM:
 For depth/coverage tracking, use {{ extractDsRef(it) }} or custom closures. Use the inline pipe | for groupTuple and plots.
@@ -115,6 +124,10 @@ reads.combine(reference).multiMap {{ reads: it[0..1]; reference: it[2..4] }}.set
 // Plasmids
 branched.riscd.combine(branched.plasmids.flatten())
 ```
+
+* THE "GLOBALS VS ENTRYPOINT" IDIOM (Static vs Active):
+globals list: ONLY use for hardcoded static strings or paths (e.g., 'NC_045512.2'). When attaching a static global reference, use .multiMap {{ reference: [ refRiscd, refCode, file(refPath) ] }}.
+entrypoint body_code: ALL active data channels (e.g., getReference('fa'), getHostUnkeyed(), getSingleInput()) MUST be instantiated here. NEVER put functions in globals!
 
 * THE "STATIC REFERENCE INJECTION" IDIOM:
 When a module requires hardcoded reference paths or IDs (like a specific viral fasta), define those constants in the `globals` JSON list. DO NOT put `def` constants inside the workflow `main:` block. Then use `.multiMap` to attach them to your channel.
