@@ -347,6 +347,48 @@ class WorkflowBlock(BaseModel):
                 )
         return self
 
+    @model_validator(mode='after')
+    def forbid_naked_process_calls(self):
+        if not self.body_code:
+            return self
+
+        valid_prefixes = ('step_', 'multi_', 'module_')
+        
+        valid_funcs = {
+            'extractKey', 'getEmpty', 'extractDsRef', 'groupTuple', 'tuple', 
+            'file', 'println', 'log', 'exit', 'Channel', 'getSingleInput', 
+            'getInput', 'getReference', 'getReferences', 'getHostUnkeyed', 
+            'param', 'optional', 'checkEnum'
+        }
+
+        calls = re.finditer(r'(?<!\.)\b([a-zA-Z0-9_]+)\s*\(', self.body_code)
+        for match in calls:
+            func_name = match.group(1)
+            
+            if not func_name.startswith(valid_prefixes) and func_name not in valid_funcs:
+                raise ValueError(
+                    f"\n=======================================================\n"
+                    f"HALLUCINATED PROCESS ERROR in '{self.name}': You called `{func_name}()` directly.\n"
+                    f"In cohesive-ngsmanager, you CANNOT call naked process names. All external tools MUST be called via their wrapper steps.\n"
+                    f"CRITICAL REPAIR INSTRUCTION:\n"
+                    f"Find the correct `step_` wrapper for `{func_name}` (e.g., `step_..._{func_name}`) and use that instead.\n"
+                    f"=======================================================\n"
+                )
+
+        pipes = re.finditer(r'\|\s*([a-zA-Z0-9_]+)\b', self.body_code)
+        for match in pipes:
+            pipe_target = match.group(1)
+            if not pipe_target.startswith(valid_prefixes) and pipe_target not in valid_funcs:
+                 raise ValueError(
+                    f"\n=======================================================\n"
+                    f"PIPING ERROR in '{self.name}': You piped into `{pipe_target}`.\n"
+                    f"You MUST pipe into a valid `step_` wrapper. Raw naked processes are forbidden.\n"
+                    f"CRITICAL REPAIR INSTRUCTION:\n"
+                    f"Replace `{pipe_target}` with its full `step_..._{pipe_target}` wrapper name.\n"
+                    f"=======================================================\n"
+                )
+        return self
+
 class Entrypoint(BaseModel):
     body_code: str = Field(
         description="The code inside the main unnamed workflow. Do not write 'workflow {{ }}'."
