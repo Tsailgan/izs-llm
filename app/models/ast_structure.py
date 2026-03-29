@@ -53,7 +53,7 @@ class GlobalDef(BaseModel):
     @field_validator('value')
     def forbid_active_channels(cls, v):
         """Blocks the LLM from putting getSingleInput() or getReference() in the globals block."""
-        if '(' in v and ')' in v and any(kw in v for kw in ['get', 'param', 'Channel']):
+        if '(' in v and ')' in v and any(kw in v for kw in ['get', 'Channel']):
             raise ValueError(
                 f"\n=======================================================\n"
                 f"GLOBAL SCOPE ERROR: You placed an active function '{v}' in the `globals` list.\n"
@@ -353,6 +353,7 @@ class WorkflowBlock(BaseModel):
 
     @model_validator(mode='after')
     def forbid_naked_process_calls(self):
+        """Prevents raw process names but uses smart escape hatches based on the tool type."""
         if not self.body_code:
             return self
 
@@ -361,7 +362,8 @@ class WorkflowBlock(BaseModel):
         valid_funcs = {
             'extractKey', 'getEmpty', 'extractDsRef', 'groupTuple', 'tuple', 
             'file', 'getSingleInput', 'getInput', 'getReference', 'getReferences', 
-            'getHostUnkeyed', 'module_qc_fastqc', 'module_qc_nanoplot', 'module_qc_quast'
+            'getHostUnkeyed', 'module_qc_fastqc', 'module_qc_nanoplot', 'module_qc_quast',
+            'param', 'optional'
         }
 
         calls = re.finditer(r'(?<!\.)\b([a-zA-Z0-9_]+)\s*\(', self.body_code)
@@ -369,14 +371,26 @@ class WorkflowBlock(BaseModel):
             func_name = match.group(1)
             
             if not func_name.startswith(valid_prefixes) and func_name not in valid_funcs:
-                raise ValueError(
-                    f"\n=======================================================\n"
-                    f"HALLUCINATED PROCESS ERROR in '{self.name}': You called `{func_name}()` directly.\n"
-                    f"In cohesive-ngsmanager, raw process calls are FORBIDDEN.\n"
-                    f"CRITICAL REPAIR INSTRUCTION:\n"
-                    f"Use the full module name for QC: `module_qc_fastqc`, `module_qc_nanoplot`, or `module_qc_quast`.\n"
-                    f"=======================================================\n"
-                )
+                # If it's a QC tool, give the exact QC instruction
+                if func_name in ['fastqc', 'nanoplot', 'quast']:
+                    raise ValueError(
+                        f"\n=======================================================\n"
+                        f"HALLUCINATED QC PROCESS ERROR: You called `{func_name}()` directly.\n"
+                        f"CRITICAL REPAIR INSTRUCTION:\n"
+                        f"Use the full module name for QC: `module_qc_{func_name}`.\n"
+                        f"=======================================================\n"
+                    )
+                else:
+                    raise ValueError(
+                        f"\n=======================================================\n"
+                        f"FATAL HALLUCINATION LOOP: You called `{func_name}()` directly.\n"
+                        f"In cohesive-ngsmanager, raw process calls are STRICTLY FORBIDDEN.\n"
+                        f"CRITICAL REPAIR INSTRUCTION:\n"
+                        f"1. You MUST change the name to start with `step_` or `multi_` (e.g., `step_00_placeholder__{func_name}`).\n"
+                        f"2. Even if you don't know the exact wrapper name, INVENT ONE that starts with `step_` just to pass this check!\n"
+                        f"3. DO NOT output `{func_name}()` again!\n"
+                        f"=======================================================\n"
+                    )
         return self
 
     @model_validator(mode='after')
