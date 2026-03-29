@@ -116,17 +116,27 @@ reads.combine(reference).multiMap {{ reads: it[0..1]; reference: it[2..4] }}.set
 branched.riscd.combine(branched.plasmids.flatten())
 ```
 
+* THE "STATIC REFERENCE INJECTION" IDIOM:
+When a module requires hardcoded reference paths or IDs (like a specific viral fasta), define those constants in the `globals` JSON list. DO NOT put `def` constants inside the workflow `main:` block. Then use `.multiMap` to attach them to your channel.
+```groovy
+// Assuming globals: referenceRiscd, referenceCode, referencePath
+trimmed.multiMap {{ 
+    trimmed: it
+    reference: [ referenceRiscd, referenceCode, file(referencePath) ]
+}}.set {{ trAndRef }}
+```
+
 # 2. STRICT DSL2 AND FORMATTING RULES
 * NO WORKFLOW WRAPPERS. In the body_code for workflows and the entrypoint DO NOT write workflow {{ ... }} or main. The Python rendering engine does this automatically. Just write the inner logic.
 * NO LOGIC IN INLINE PROCESSES. The inline_processes list is ONLY for raw bash scripts. Do not put Nextflow logic inside an inline process. Use sub_workflows for logic.
 
-# 3. NEXTFLOW DATA FLOW AND SYNTAX & STRICT SHAPING RULES
-Nextflow is a reactive dataflow programming language. Channels act as asynchronous queues.
-* PROCESS OUTPUTS. When you call a process or sub-workflow assign it to a variable. To access multiple outputs you MUST use the .out property or the specific emitted name.
-* NATIVE ASSIGNMENT. Use cohesive's native `.set {{ }}` style or standard direct assignment. Do NOT mix `def` with `.set`.
-* ACCESSING PARAMETERS. To check a global parameter, use standard params.variable syntax (e.g., `if (!params.skip_bestref_mapping)`) UNLESS the user explicitly requests a custom helper function like param('variable').
-* STRICT DATA SHAPING (MANDATORY). NEVER pass a `.cross()` or `.combine()` output directly into a process argument (e.g., WRONG: `process(reads.cross(refs))`). 
-  - ALWAYS put the `.cross()` on a separate line, chain it with `.map`, `.multiMap`, or `.set`, and pass the shaped variable to the process.
+# 3. VARIABLE SCOPING & SUB-WORKFLOWS
+* USE WHAT YOU TAKE. If you put a variable in take_channels, you MUST use it in the body_code.
+* NO UNNECESSARY EMITS. If a module is a terminal step and its outputs are not needed by the entrypoint or downstream workflows, DO NOT emit anything! Leave `emit_channels` empty.
+* NO HALLUCINATED OUTPUTS. Do not invent or guess process output names (e.g., `pangolin_out.lineage_report`). Only emit standard, proven outputs like `.consensus`, `.lineage`, or `.out`.
+* OUTPUTS. Add variable assignments to the emit_channels JSON list (e.g., `["consensus = bowtie_res.consensus"]`).
+* STRICT EMIT FORMAT. DO NOT put function calls in emit_channels. ONLY put variable assignments.
+* EMITTING ALL REQUIRED CHANNELS. If you define a channel in a sub-workflow and try to use it later, you MUST emit it!
 
 # 4. VARIABLE SCOPING AND SUB-WORKFLOW COMMUNICATION
 Sub-workflows are isolated environments. They CANNOT see variables defined in the entrypoint. You MUST pass variables explicitly through take and emit channels.
