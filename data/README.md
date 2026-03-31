@@ -6,17 +6,17 @@ This parent directory contains the "truth" behind the conversational RAG platfor
 
 ```mermaid
 flowchart TD
-    UserQuery(User: "I need to sequence COVID") --> FAISS
-    FAISS[(FAISS Semantic DB)] -.-> |Matches "covid" vector| Tmpl_Metadata
+    UserQuery["User: I need to sequence COVID"] --> FAISS
+    FAISS[("FAISS Semantic DB")] -.-> |"Matches 'covid' vector"| Tmpl_Metadata
     
-    subgraph JSON Catalogs
-        Tmpl_Metadata(Module: Covid Emergency) --> Comp(Step: Bowtie)
-        Comp --> Resource_Tool(Func: parseRiscd)
+    subgraph JSON_Catalogs ["JSON Catalogs"]
+        Tmpl_Metadata["Module: Covid Emergency"] --> Comp["Step: Bowtie"]
+        Comp --> Resource_Tool["Func: parseRiscd"]
     end
     
-    subgraph Raw Extraction
-    Tmpl_Metadata & Comp & Resource_Tool --> CodeStore[(code_store_hollow.jsonl)]
-    CodeStore --> |Hydrates actual .nf strings| LLM_Context((LLM Context Prompt))
+    subgraph Raw_Extraction ["Raw Extraction"]
+        Tmpl_Metadata & Comp & Resource_Tool --> CodeStore[("code_store_hollow.jsonl")]
+        CodeStore --> |"Hydrates actual .nf strings"| LLM_Context(("LLM Context Prompt"))
     end
 ```
 
