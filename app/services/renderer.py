@@ -42,10 +42,10 @@ def renderer_node(state: GraphState):
     try:
         nf_code = render_nextflow_code(raw_ast)
         
-        # Inject warning comment if validation error persisted through the retries
+        # Inject simple warning comment at the bottom if validation error persisted
         validation_error = state.get('validation_error')
         if validation_error:
-            warning = f"// ⚠️ WARNING: Pipeline generation failed strict DSL2 validation.\n// The code below is potentially broken or incomplete.\n// Error: {validation_error}\n\n"
+            warning = f"// ⚠️ WARNING: Pipeline generation failed strict DSL2 validation.\n// The code above is potentially broken or incomplete and was output as a best-effort draft.\n\n"
             nf_code = warning + nf_code
             messages_update.append(AIMessage(content="⚠️ **Generation Warning**: I reached the maximum number of attempts trying to generate a perfectly valid pipeline. I have output the current draft as a **best effort**, but please note that the generated code **might have errors or missing components** based on the strict DSL2 rules."))
             
