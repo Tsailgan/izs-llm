@@ -373,7 +373,23 @@ def architect_node(state: GraphState):
         }
     except Exception as e:
         print(f"⚠️ Architect Validation Failed: {str(e)}")
+        
+        raw_ast = {}
+        # Attempt best-effort extraction from OutputParserException or ValidationError
+        llm_output = getattr(e, "llm_output", None)
+        if llm_output and isinstance(llm_output, str):
+            import json, re
+            try:
+                content = llm_output
+                match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', content, re.DOTALL)
+                if match:
+                    content = match.group(1)
+                raw_ast = json.loads(content)
+            except Exception:
+                pass
+                
         return {
+            "ast_json": raw_ast,
             "validation_error": str(e),
             "retries": state.get("retries", 0) + 1
         }

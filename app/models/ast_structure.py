@@ -500,10 +500,13 @@ class NextflowPipelineAST(BaseModel):
         """If you define a sub_workflow, you must actually use it."""
         all_code = self.entrypoint.body_code
         for sw in self.sub_workflows:
+            all_code += "\n" + sw.body_code
+            
+        for sw in self.sub_workflows:
             pattern = rf"\b{sw.name}\b\s*\("
             if not re.search(pattern, all_code):
                 raise ValueError(
                     f"VALIDATION ERROR: The sub_workflow '{sw.name}' is defined but NEVER CALLED in the pipeline. "
-                    f"Either call it in the entrypoint workflow or remove it."
+                    f"Either call it in the entrypoint or subworkflow or remove it."
                 )
         return self
