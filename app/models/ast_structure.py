@@ -351,34 +351,6 @@ class WorkflowBlock(BaseModel):
                 )
         return self
 
-    # @model_validator(mode='after')
-    # def forbid_naked_process_calls(self):
-    #     if not self.body_code:
-    #         return self
-
-    #     valid_prefixes = ('step_', 'multi_', 'module_')
-        
-    #     valid_funcs = {
-    #         'extractKey', 'getEmpty', 'extractDsRef', 'groupTuple', 'tuple', 
-    #         'file', 'getSingleInput', 'getInput', 'getReference', 'getReferences', 
-    #         'getHostUnkeyed', 'module_qc_fastqc', 'module_qc_nanoplot', 'module_qc_quast'
-    #     }
-
-    #     calls = re.finditer(r'(?<!\.)\b([a-zA-Z0-9_]+)\s*\(', self.body_code)
-    #     for match in calls:
-    #         func_name = match.group(1)
-            
-    #         if not func_name.startswith(valid_prefixes) and func_name not in valid_funcs:
-    #             raise ValueError(
-    #                 f"\n=======================================================\n"
-    #                 f"HALLUCINATED PROCESS ERROR in '{self.name}': You called `{func_name}()` directly.\n"
-    #                 f"In cohesive-ngsmanager, raw process calls are FORBIDDEN.\n"
-    #                 f"CRITICAL REPAIR INSTRUCTION:\n"
-    #                 f"Use the full module name for QC: `module_qc_fastqc`, `module_qc_nanoplot`, or `module_qc_quast`.\n"
-    #                 f"=======================================================\n"
-    #             )
-    #     return self
-
     @model_validator(mode='after')
     def forbid_active_channels_in_subworkflows(self):
         if not self.body_code:
