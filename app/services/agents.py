@@ -270,8 +270,11 @@ module_segmented(ch_ready.reads, ch_ready.refs)
 - Sub-workflows are **isolated** — they cannot see entrypoint variables.
 - Every `take_channels` entry **must** appear in `body_code`.
 - `emit_channels`: only variable names or property assignments. No function calls.
-  - ✓ `["consensus = ivar_res.consensus"]` / `["assembled"]`
+  - ✓ `["consensus = ivar_res.consensus"]` (Direct extraction in emit)
   - ✗ `["out = step_2AS_mapping__ivar(reads, refs)"]`
+- **NO POINTLESS `.set` ALIASING**: Do NOT use `.set {{}}` just to rename a process output so you can emit it. Handle the extraction directly in the `emit_channels` JSON list!
+  - ✗ `body_code`: `kraken_out.genus_report.set {{ genus_report }}`, `emit_channels`: `["genus_report"]`
+  - ✓ `body_code`: `kraken_out = step_3TX(...)`, `emit_channels`: `["genus_report = kraken_out.genus_report"]`
 - Emit **what you defined**. If you created `prepared_data` via `.map`, emit that — not the raw input.
 - **Terminal sub-workflows** (final step): `emit_channels` must be `[]`.
 - **Void tools**: never assign to variable, never emit.
