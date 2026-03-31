@@ -550,3 +550,6 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
 
     except Exception as e:
         print(f"FAISS search error: {e}")
+
+    final_context = "\n".join(context_blocks) + "\n\n"
+    return final_context
