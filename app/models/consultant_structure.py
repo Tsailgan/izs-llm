@@ -1,6 +1,6 @@
 import json
 from typing import Literal, Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 class ConsultantOutput(BaseModel):
     response_to_user: str = Field(
