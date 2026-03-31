@@ -93,6 +93,44 @@ class InlineProcess(BaseModel):
             raise ValueError(f"Process '{v}' is UPPERCASE. It should likely be a Global Constant, not a Process.")
         return v
 
+# Void tool suffixes (double-underscore prefix ensures exact matching).
+# e.g. '__abricate' matches step_4AN_AMR__abricate but NOT step_3TX_species__vdabricate.
+# NOTE: __filtering removed — step_1PP_filtering__bowtie/minimap2 are EMITTING tools.
+VOID_TOOL_SUFFIXES = [
+    '__pangolin', '__prokka', '__abricate', '__staramr', '__resfinder',
+    '__mlst', '__flaa', '__chewbbaca', '__centrifuge',
+    '__confindr', '__mash', '__fastq', '__snippy',
+]
+# Exact void tool/module names (for tools that can't be matched by suffix)
+VOID_EXACT_NAMES = [
+    'module_qc_fastqc', 'module_qc_nanoplot', 'module_qc_quast',
+    'step_4an_amr__filtering',  # Only THIS filtering tool is void (stored lowercase for comparison)
+]
+
+def _is_void_tool(name: str) -> bool:
+    """Check if a process/module name is a void tool (no emit channels)."""
+    lower = name.lower().strip()
+    if lower in VOID_EXACT_NAMES:
+        return True
+    for suffix in VOID_TOOL_SUFFIXES:
+        if lower.endswith(suffix):
+            return True
+    return False
+
+def _is_void_reference(text: str) -> bool:
+    """Check if a string references a void tool (for emit filtering)."""
+    lower = text.lower()
+    if any(name in lower for name in VOID_EXACT_NAMES):
+        return True
+    for suffix in VOID_TOOL_SUFFIXES:
+        if suffix.lstrip('_') in lower:
+            # Guard: vdabricate is emitting, not void
+            if suffix == '__abricate' and 'vdabricate' in lower:
+                continue
+            return True
+    return False
+
+
 class WorkflowBlock(BaseModel):
     name: str = Field(description="The name of the workflow.")
     take_channels: List[str] = Field(default=[], description="List of input channel names.")
@@ -107,6 +145,7 @@ class WorkflowBlock(BaseModel):
         body = data.get('body_code', '')
         if not isinstance(body, str): return data
         
+        # --- Extract inline emit: blocks into emit_channels ---
         emit_match = re.search(r'^\s*emit:\s*([\s\S]*)$', body, flags=re.MULTILINE)
         if emit_match:
             emit_block = emit_match.group(1)
@@ -119,6 +158,7 @@ class WorkflowBlock(BaseModel):
                         existing.append(emit_str)
                 data['emit_channels'] = existing
 
+        # --- Strip workflow/take/main/emit wrappers ---
         match = re.search(r'^\s*workflow\s+[_a-zA-Z0-9]*\s*\{(.*)\}\s*$', body, re.DOTALL)
         if match: body = match.group(1)
 
@@ -126,7 +166,46 @@ class WorkflowBlock(BaseModel):
         body = re.sub(r'^\s*emit:[\s\S]*', '', body, flags=re.MULTILINE)
         body = re.sub(r'^\s*main:\s*', '', body, flags=re.MULTILINE)
 
+        # --- DETERMINISTIC HEAL: Strip dsl=2 header if LLM included it ---
+        body = re.sub(r'^\s*nextflow\.enable\.dsl\s*=\s*2\s*\n?', '', body, flags=re.MULTILINE)
+
+        # --- DETERMINISTIC HEAL #4: Strip void tool assignments ---
+        # Converts `var = step_4TY_lineage__pangolin(...)` → `step_4TY_lineage__pangolin(...)`
+        def _strip_void_assignment(m):
+            full_match = m.group(0)
+            proc_name = m.group(2)
+            if _is_void_tool(proc_name):
+                # Remove the `varname = ` prefix
+                return re.sub(r'^\s*[a-zA-Z0-9_]+\s*=\s*', '', full_match)
+            return full_match
+        
+        body = re.sub(
+            r'^(\s*[a-zA-Z0-9_]+\s*=\s*)((?:step_|multi_|module_)[a-zA-Z0-9_]+)\s*\(',
+            _strip_void_assignment,
+            body,
+            flags=re.MULTILINE
+        )
+
+        # --- DETERMINISTIC HEAL #6: Auto-inject [1..3] reference slice ---
+        # Only in mapping tool contexts: if step_2AS_mapping__ is in the body
+        if 'step_2AS_mapping__' in body and '.multiMap' in body:
+            body = re.sub(
+                r'(refs?\s*:\s*it\[1\])(?!\s*\[)',
+                r'\1[1..3]',
+                body
+            )
+
         data['body_code'] = body.strip()
+
+        # --- DETERMINISTIC HEAL #5: Remove void tool entries from emit_channels ---
+        emits = data.get('emit_channels', [])
+        if emits:
+            cleaned_emits = [e for e in emits if not _is_void_reference(e)]
+            if len(cleaned_emits) != len(emits):
+                removed = set(emits) - set(cleaned_emits)
+                print(f"  [AUTO-HEAL] Removed void tool references from emit_channels: {removed}")
+            data['emit_channels'] = cleaned_emits
+
         return data
 
     @field_validator('emit_channels')
@@ -136,36 +215,38 @@ class WorkflowBlock(BaseModel):
                 raise ValueError(
                     f"STRICT EMIT FORMAT ERROR: '{emit_str}' contains parenthesis. "
                     f"DO NOT put function calls in the emit channels.\n"
-                    f"CRITICAL REPAIR INSTRUCTION: Assign the process to a variable in your body_code, "
-                    f"and only emit the variable name (e.g., 'depleted_reads') or property (e.g., 'consensus = out.consensus')."
+                    f"Use 'name = variable.property' or a bare variable name."
                 )
         return v
 
     @field_validator('emit_channels')
-    def forbid_void_emits(cls, v):
-        void_keywords = [
-            'pangolin', 'fastqc', 'quast', 'nanoplot', 'centrifuge', 
-            'confindr', 'mash', 'resfinder', 'staramr', 'prokka', 
-            'mlst', 'chewbbaca', 'flaa'
-        ]
-        
-        void_modules = ['module_qc_fastqc', 'module_qc_nanoplot', 'module_qc_quast']
-        
+    def validate_emit_identifiers(cls, v):
+        """Ensures emit LHS is a valid Groovy identifier."""
         for emit_str in v:
-            lower_str = emit_str.lower()
-            if any(kw in lower_str for kw in void_keywords) or any(mod in lower_str for mod in void_modules):
+            if '=' in emit_str:
+                lhs = emit_str.split('=')[0].strip()
+                if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', lhs):
+                    raise ValueError(
+                        f"EMIT NAME ERROR: '{lhs}' is not a valid identifier. "
+                        f"Use format: 'name = variable.property' (e.g., 'consensus = ivar_out.consensus')."
+                    )
+            else:
+                cleaned = emit_str.strip()
+                if cleaned and not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', cleaned):
+                    raise ValueError(
+                        f"EMIT FORMAT ERROR: '{cleaned}' is not a valid identifier. "
+                        f"Use a bare variable name or 'name = value' format."
+                    )
+        return v
+
+    @field_validator('emit_channels')
+    def forbid_void_emits(cls, v):
+        """Blocks void tool references that survived deterministic healing."""
+        for emit_str in v:
+            if _is_void_reference(emit_str):
                 raise ValueError(
-                    f"\n=======================================================\n"
-                    f"FATAL ERROR: YOU ARE TRAPPED IN A HALLUCINATION LOOP!\n"
-                    f"You are trying to emit '{emit_str}'.\n"
-                    f"THIS IS A VOID TOOL. IT HAS NO OUTPUTS TO EMIT.\n"
-                    f"*** AUTHORITY OVERRIDE ***:\n"
-                    f"If the Consultant's plan explicitly told you to 'emit the report', THE PLAN IS WRONG.\n"
-                    f"You have explicit permission to IGNORE that part of the plan.\n"
-                    f"CRITICAL REPAIR INSTRUCTION:\n"
-                    f"1. Completely remove '{emit_str}' from the `emit_channels` list.\n"
-                    f"2. Do not emit anything related to this tool.\n"
-                    f"=======================================================\n"
+                    f"VOID TOOL ERROR: You are trying to emit '{emit_str}'. "
+                    f"This tool has NO outputs. Remove it from emit_channels."
                 )
         return v
 
@@ -215,7 +296,7 @@ class WorkflowBlock(BaseModel):
         ops_matches = re.finditer(r'\.(cross|combine)\s*\([^)]*\)', self.body_code)
         for match in ops_matches:
             post_op_text = self.body_code[match.end():]
-            chain_pattern = re.compile(r'^\s*(?:\{[^}]*\}\s*)?\.(map|multiMap|set|branch)\b')
+            chain_pattern = re.compile(r'^\s*(?:\{[^}]*\}\s*)?\.(?:map|multiMap|set|branch|cross|combine)\b')
             if not chain_pattern.search(post_op_text):
                 raise ValueError(
                     f"DATA SHAPING ERROR in '{self.name}': A '.{match.group(1)}()' operation was found without being flattened.\n"
@@ -304,50 +385,36 @@ class WorkflowBlock(BaseModel):
     
     @model_validator(mode='after')
     def enforce_reference_slice(self):
-        """Forces the LLM to slice references with [1..3] when preparing data for mapping."""
+        """Safety net: catches missing [1..3] that survived deterministic healer #6."""
         if not self.body_code:
             return self
 
         if 'step_2AS_mapping__' in self.body_code and '.multiMap' in self.body_code:
             bad_pattern = r'\b[a-zA-Z0-9_]+\s*:\s*it\[1\](?!\s*\[)'
-            
             if re.search(bad_pattern, self.body_code):
                 raise ValueError(
-                    f"\n=======================================================\n"
-                    f"DATA SHAPING ERROR in '{self.name}': You forgot the `[1..3]` slice for the reference!\n"
-                    f"When crossing reads with a reference for mapping tools (e.g., Bowtie, Minimap2, Ivar), "
-                    f"you MUST extract the riscd, code, and path using `it[1][1..3]`.\n"
-                    f"CRITICAL REPAIR INSTRUCTION:\n"
-                    f"Inside your `.multiMap {{ ... }}` block, change `it[1]` to `it[1][1..3]`.\n"
-                    f"=======================================================\n"
+                    f"DATA SHAPING ERROR in '{self.name}': Missing `[1..3]` slice for reference. "
+                    f"Change `it[1]` to `it[1][1..3]` inside the `.multiMap` block."
                 )
         return self
 
     @model_validator(mode='after')
     def forbid_void_tool_assignment(self):
-        """Physically blocks the LLM from assigning Void tools to variables using '='."""
+        """Safety net: catches void tool assignments that survived deterministic healing."""
         if not self.body_code:
             return self
 
-        void_keywords = [
-            'pangolin', 'fastqc', 'quast', 'nanoplot', 'centrifuge', 
-            'confindr', 'mash', 'resfinder', 'staramr', 'prokka', 
-            'mlst', 'chewbbaca', 'flaa'
-        ]
-
-        for kw in void_keywords:
-            bad_pattern = rf'\b[a-zA-Z0-9_]+\s*=\s*(?:step_|multi_|module_)[a-zA-Z0-9_]*{kw}[a-zA-Z0-9_]*\s*\('
-            
-            if re.search(bad_pattern, self.body_code.lower()):
+        # Find all assignments to process calls
+        assignment_matches = re.finditer(
+            r'\b[a-zA-Z0-9_]+\s*=\s*((?:step_|multi_|module_)[a-zA-Z0-9_]+)\s*\(',
+            self.body_code
+        )
+        for m in assignment_matches:
+            proc_name = m.group(1)
+            if _is_void_tool(proc_name):
                 raise ValueError(
-                    f"\n=======================================================\n"
-                    f"VOID TOOL ERROR in '{self.name}': You assigned a VOID TOOL ('{kw}') to a variable.\n"
-                    f"Void tools use `publishDir` and return NOTHING. Assigning them to a variable causes a runtime crash.\n"
-                    f"CRITICAL REPAIR INSTRUCTION:\n"
-                    f"1. Remove the `variable = ` assignment completely.\n"
-                    f"2. Just call the process directly on its own line: `step_..._{kw}(...)`\n"
-                    f"3. Make sure you delete that variable from your `emit_channels` entirely!\n"
-                    f"=======================================================\n"
+                    f"VOID TOOL ERROR in '{self.name}': Assigned void tool '{proc_name}' to a variable. "
+                    f"Remove the assignment and call it directly."
                 )
         return self
 
@@ -358,7 +425,12 @@ class WorkflowBlock(BaseModel):
 
         active_channel_funcs = [
             'getSingleInput', 'getInput', 'getReference', 'getReferences',
-            'getHostUnkeyed', 'getHost', 'getAssembly', 'getTrimmedReads'
+            'getReferenceOptional', 'getReferenceUnkeyed',
+            'getHost', 'getHostOptional', 'getHostUnkeyed', 'getHostReference',
+            'getAssembly', 'getTrimmedReads', 'getDepletedReads',
+            'getDS', 'getVCFs', 'getLongReads', 'getKrakenResults',
+            'getKingdom', 'getGenusSpecies', 'getGenusSpeciesOptional',
+            'getGenusSpeciesOptionalUnkeyed', 'getInputFolders', 'getInputOf',
         ]
 
         for func in active_channel_funcs:
@@ -386,11 +458,16 @@ class Entrypoint(BaseModel):
         """Silently cleans up the entrypoint logic."""
         if not isinstance(v, str): return v
 
+        # Strip dsl=2 header
+        v = re.sub(r'^\s*nextflow\.enable\.dsl\s*=\s*2\s*\n?', '', v, flags=re.MULTILINE)
+
+        # Unwrap workflow { } wrapper
         match = re.search(r'^\s*workflow\s*\{(.*)\}\s*$', v, re.DOTALL)
         if match: v = match.group(1)
 
+        # Strip take/main/emit keywords (entrypoints don't have take: or emit:)
+        v = re.sub(r'^\s*take:.*?(?=^\s*main:|^\s*emit:|\Z)', '', v, flags=re.MULTILINE | re.DOTALL)
         v = re.sub(r'^\s*main:\s*', '', v, flags=re.MULTILINE)
-
         v = re.sub(r'^\s*emit:[\s\S]*', '', v, flags=re.MULTILINE)
 
         return v.strip()
@@ -401,6 +478,43 @@ class NextflowPipelineAST(BaseModel):
     inline_processes: List[InlineProcess] = []
     sub_workflows: List[WorkflowBlock] = []
     entrypoint: Entrypoint
+
+    @model_validator(mode='before')
+    @classmethod
+    def auto_relocate_active_globals(cls, data: dict) -> dict:
+        """Deterministically moves active channel calls from globals to entrypoint."""
+        if not isinstance(data, dict): return data
+        globals_list = data.get('globals', [])
+        if not globals_list: return data
+
+        active_keywords = ['get', 'param', 'Channel', 'getSingleInput', 'getInput',
+                           'getReference', 'getHost', 'getTrimmedReads', 'getAssembly']
+        
+        safe_globals = []
+        relocated_lines = []
+        for g in globals_list:
+            if not isinstance(g, dict):
+                safe_globals.append(g)
+                continue
+            val = g.get('value', '')
+            # Check if value contains active function calls
+            if '(' in val and ')' in val and any(kw in val for kw in active_keywords):
+                name = g.get('name', 'unknown')
+                relocated_lines.append(f"{name} = {val}")
+                print(f"  [AUTO-HEAL] Relocated active global '{name} = {val}' to entrypoint")
+            else:
+                safe_globals.append(g)
+        
+        if relocated_lines:
+            data['globals'] = safe_globals
+            ep = data.get('entrypoint', {})
+            if isinstance(ep, dict):
+                existing_body = ep.get('body_code', '')
+                prefix = '\n'.join(relocated_lines)
+                ep['body_code'] = f"{prefix}\n{existing_body}" if existing_body else prefix
+                data['entrypoint'] = ep
+        
+        return data
 
     @model_validator(mode='after')
     def auto_generate_imports(self):
@@ -425,6 +539,11 @@ class NextflowPipelineAST(BaseModel):
             'isSpeciesSupported', 'csv2map', 'flattenPath', 'logHeader'
         }
 
+        sampletype_funcs = {
+            'isBacterium', 'isVirus', 'isFungus', 'isSarsCov2',
+            'isPositiveControlSarsCov2', 'isNegativeControlSarsCov2', 'isNGSMG16S'
+        }
+
         param_funcs = {
             'getTrimmedReads', 'getAssembly', 'getDepletedReads', 'getReferenceCodes',
             'getNCBICodes', 'getReferences', 'getReference', 'getReferenceUnkeyed',
@@ -435,7 +554,7 @@ class NextflowPipelineAST(BaseModel):
             'optional', 'optionalOrDefault', 'isIonTorrent', 'isNanopore', 'isIlluminaPaired',
             'isCompatibleWithSeqType', 'isSegmentedMapping', 'checkEnum', 'getHostReference',
             'getLongReads', 'paramWrap', 'optWrap', '_getReferences', '_getSingleReference',
-            'getHostOptional', 'getHostUnkeyed', 'getGenusSpeciesOptionalUnkeyed',
+            'getHostOptional', 'getHostUnkeyed', 'getHostReference', 'getGenusSpeciesOptionalUnkeyed',
             'getGenusSpeciesOptional', 'getSpecies', 'getBlastDatabaseUnkeyed', 'getKingdom',
             'getTaxIdsUnkeyed', 'getParamIncludeParents', 'getParamIncludeChildren',
             '_getAlleles', 'getParam', 'getInputOf', 'getInputFolders', 'getSingleInput'
@@ -453,6 +572,8 @@ class NextflowPipelineAST(BaseModel):
                 path = "../functions/common.nf"
             elif func in param_funcs:
                 path = "../functions/parameters.nf"
+            elif func in sampletype_funcs:
+                path = "../functions/sampletypes.nf"
             else:
                 continue
                 
