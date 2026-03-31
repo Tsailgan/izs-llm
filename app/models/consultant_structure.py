@@ -25,3 +25,9 @@ class ConsultantOutput(BaseModel):
         default=[], 
         description="CRITICAL: MUST be a list of EXACT component IDs from the RAG context (e.g., ['step_2AS_mapping__ivar']). Do not use shorthand like 'ivar'."
     )
+
+    @field_validator('selected_module_ids', mode='before')
+    def prevent_null_list(cls, v):
+        if v is None:
+            return []
+        return v
