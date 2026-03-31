@@ -557,7 +557,7 @@ class NextflowPipelineAST(BaseModel):
             'getHostOptional', 'getHostUnkeyed', 'getHostReference', 'getGenusSpeciesOptionalUnkeyed',
             'getGenusSpeciesOptional', 'getSpecies', 'getBlastDatabaseUnkeyed', 'getKingdom',
             'getTaxIdsUnkeyed', 'getParamIncludeParents', 'getParamIncludeChildren',
-            '_getAlleles', 'getParam', 'getInputOf', 'getInputFolders', 'getSingleInput'
+            '_getAlleles', 'getParam', 'getInputOf', 'getInputFolders', 'getSingleInput', 'param'
         }
         
         import_map = {}
