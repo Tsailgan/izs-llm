@@ -314,13 +314,15 @@ class WorkflowBlock(BaseModel):
             
         valid_vars = set(self.take_channels)
 
-        assignments = re.findall(r'^[\s]*(?:def\s+)?([a-zA-Z0-9_]+)\s*=', self.body_code, re.MULTILINE)
+        # Catch assignments (e.g., my_var = ... or Channel my_var = ...)
+        assignments = re.findall(r'\b([a-zA-Z0-9_]+)\s*=(?!=)', self.body_code)
         valid_vars.update(assignments)
        
+        # Catch .set { my_var }
         sets = re.findall(r'\.set\s*\{\s*([a-zA-Z0-9_]+)\s*\}', self.body_code)
         valid_vars.update(sets)
 
-        process_calls = re.findall(r'\b([a-zA-Z0-9_]+)\s*\(', self.body_code)
+        process_calls = re.findall(r'\b((?:step_|multi_|module_)[a-zA-Z0-9_]+)\s*\(', self.body_code)
         valid_vars.update(process_calls)
 
         for emit_str in self.emit_channels:
@@ -333,13 +335,15 @@ class WorkflowBlock(BaseModel):
                 
             if base_var not in valid_vars:
                 raise ValueError(
-                    f"HALLUCINATION DETECTED in workflow '{self.name}'. "
-                    f"You are trying to emit '{emit_str}' but the variable '{base_var}' was NEVER DEFINED.\n\n"
-                    f"CRITICAL REPAIR INSTRUCTION:\n"
-                    f"1. If '{base_var}' is supposed to be the output of a Void tool (like Pangolin, FastQC, or reporting tools that use publishDir), "
-                    f"it DOES NOT output a channel. You MUST completely REMOVE '{emit_str}' from your `emit_channels` list.\n"
-                    f"2. DO NOT try to assign Void tools to variables (e.g. do not write `res = pangolin()`). Just call the process directly.\n"
-                    f"3. Do not invent or guess variable names to make this error go away. Delete the emit entirely."
+                    f"\n=======================================================\n"
+                    f"HALLUCINATION DETECTED in workflow '{self.name}'.\n"
+                    f"You are trying to emit '{emit_str}' but the base variable '{base_var}' was NEVER DEFINED in the body_code.\n\n"
+                    f"CRITICAL REPAIR INSTRUCTIONS:\n"
+                    f"1. Did you forget to extract the channel? (e.g., If you assigned `kraken_out = step_3TX(...)`, you CANNOT just emit `genus_report`. You MUST emit `kraken_out.genus_report` or define `genus_report = kraken_out.genus_report` first).\n"
+                    f"2. Did you misspell the variable name from your `.set {{}}` or assignment block?\n"
+                    f"3. If this tool is a VOID tool (publishDir only), it DOES NOT emit anything! Delete this emit entirely.\n"
+                    f"Fix the emit channel or the body_code so the variables match exactly.\n"
+                    f"=======================================================\n"
                 )
         return self
 
