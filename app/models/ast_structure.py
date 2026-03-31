@@ -526,7 +526,7 @@ class NextflowPipelineAST(BaseModel):
         for g in self.globals:
             all_code += "\n" + g.value
 
-        pattern = re.compile(r'(?<!\.)\b((?:step_|multi_|module_|prepare_|get[A-Z]|extract[A-Z]|is[A-Z]|parse[A-Z]|execution[A-Z]|task[A-Z]|check[A-Z])[a-zA-Z0-9_]*)\s*\(')
+        pattern = re.compile(r'(?<!\.)\b((?:step_|multi_|module_|prepare_|get[A-Z]|extract[A-Z]|is[A-Z]|has[A-Z]|parse[A-Z]|execution[A-Z]|task[A-Z]|check[A-Z]|param|optional)[a-zA-Z0-9_]*)\s*\(')
         used_callables = set(match.group(1) for match in pattern.finditer(all_code))
         
         defined_sws = {sw.name for sw in self.sub_workflows}
