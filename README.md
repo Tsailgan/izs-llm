@@ -102,8 +102,8 @@ The FastAPI application definition.
 #### 📁 `app/models/` (Data Structures & Validation)
 Strict Pydantic typing used by the standard API and LangChain structured outputs (`with_structured_output`). These act as the Guardrails for the Agents.
 
-- **`consultant_structure.py`**: Defines `ConsultantOutput`. Forces the Consultant LLM to return a `response_to_user`, a `status` (CHATTING or APPROVED), a `draft_plan`, and strict extracted arrays for `selected_module_ids` and `used_template_id`.
-- **`ast_structure.py`**: The most critical and complex file in the system. Defines the Abstract Syntax Tree schema (e.g., `NextflowPipelineAST`, `WorkflowBlock`, `InlineProcess`, `GlobalDef`). It contains dozens of `@field_validator` and `@model_validator` functions that actively analyze the Groovy code synthesized by the Architect LLM to block Nextflow hallucinations (e.g., preventing Void tool assignment, enforcing `.multiMap` structures, checking scope).
+- **`consultant_structure.py`**: Defines `ConsultantOutput`. Forces the Consultant LLM to return a `response_to_user`, a `status` (CHATTING or APPROVED), a `draft_plan`, and strict extracted arrays for `selected_module_ids` and `used_template_id`. Incorporates specific `@field_validator` guards (like `prevent_null_list`) to combat LLM data-type drift when returning null instead of empty arrays.
+- **`ast_structure.py`**: The most critical and complex file in the system. Defines the Abstract Syntax Tree schema (e.g., `NextflowPipelineAST`, `WorkflowBlock`, `InlineProcess`, `GlobalDef`). It contains dozens of fine-tuned `@field_validator` and `@model_validator` functions that actively analyze the Groovy code synthesized by the Architect LLM to block Nextflow hallucinations (e.g., preventing Void tool assignment, enforcing `.multiMap` structures, checking scope, ensuring strict DSL2 architecture).
 - **`diagram_structure.py`**: Defines `DiagramData` featuring `Node` and `Edge` arrays. It enforces valid Mermaid syntax (e.g., preventing reserved keywords / floating nodes) for the Diagram Agent.
 
 ---
@@ -113,13 +113,16 @@ The brains of the operation. This hooks everything together.
 
 - **`graph_state.py`**: Defines the `GraphState` `TypedDict` utilized by LangGraph to pass contextual data around the nodes (e.g., `messages`, `ast_json`, `mermaid_code`, `nextflow_code`).
 - **`graph.py`**: Contains the visual node map (defined in code using `StateGraph`). Defines the `build_consultant_subgraph` and `build_execution_subgraph`, adding the conditional edges controlling logic flow between the Consultant, Hydrator, Architect, and Renderer.
-- **`agents.py`**: Contains the actual LLM wrappers and **System Prompts**.
-  - `consultant_node`: Merges the user request with RAG data to chat with the user.
+- **`agents.py`**: Contains the actual LLM wrappers and their continuously optimized **System Prompts**.
+  - `consultant_node`: Merges the user request with RAG data to chat with the user. It explicitly verifies extracted `module_ids` and `template_id` directly against the RAG context data store to strip AI hallucinated tools out of the pipeline *before* they crash the executor.
   - `hydrator_node`: An algorithmic (non-LLM) node that evaluates the Consultant's `strategy_selector` (Exact Match, Adapted Match, Custom) and assembles the raw `code_store_hollow.jsonl` Groovy string into context for the Architect.
-  - `architect_node`: Instructed by massive system prompts dictating internal Nextflow DSL idioms, translating the Consultant's `draft_plan` into the `NextflowPipelineAST`.
+  - `architect_node`: Instructed by highly tuned system prompts dictating internal Nextflow DSL idioms, translating the Consultant's `draft_plan` into the `NextflowPipelineAST`.
   - `diagram_node`: Tells an LLM to read the final Groovy code and create nodes/edges.
 - **`llm.py`**: A factory function (`get_llm()`) that parses the configured `settings.LLM_MODEL` to return the appropriate LangChain Chat Model initialization (e.g., ChatHuggingFace vs ChatMistralAI).
-- **`tools.py`**: Contains the `retrieve_rag_context()` function. This handles **Hybrid Search**: first scanning metadata json via keyword matches, and supplementing it via FAISS semantic search. Used heavily by the Consultant.
+- **`tools.py`**: Contains the `retrieve_rag_context()` function, a highly robust **Hybrid Retrieval Engine**. It leverages an expanded multi-stage process:
+  1. **Stage 0**: Deep query normalization, replacing massive dictionaries of bioinformatics domain aliases (e.g., "rna seq" -> "rnaseq") and performing morphological stemming to prevent user queries from missing keywords.
+  2. **Stage 1**: Discovery intent detection that automatically injects a dictionary of system capabilities before tool search even occurs.
+  3. **Stage 2/3**: Combines smart keyword matching components and templates with FAISS Semantic search (backed by strict L2 distance thresholds) to formulate highly relevant technical context.
 - **`repair.py`**: The error handling loop. If `ast_structure.py` throws a Python Validation Error, the `repair_node` wraps that exact error in a strict prompt ("YOU ARE DRIFTING FROM THE SCHEMA... FIX IT") and routes back to the Architect node.
 - **`renderer.py`**: Contains the `renderer_node` which extracts the generated AST JSON and passes it to Jinja2 to render the final `main.nf` script. Contains `render_mermaid_from_json()` to parse diagram state.
 
