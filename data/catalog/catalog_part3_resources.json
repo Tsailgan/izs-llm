@@ -1,31 +1,8 @@
 {
+  "metadata": {
+    "version": "2.0"
+  },
   "resources": {
-    "docker_registry_priority": [
-      "ghcr.io/genpat-it/",
-      "quay.io/biocontainers/",
-      "biocontainers/"
-    ],
-    "containers": [
-      { "name": "fastp", "url": "ghcr.io/genpat-it/fastp:0.23.1--e4ac3df4c5" },
-      { "name": "python3", "url": "ghcr.io/genpat-it/python3:3.10.1--29cf21c1f1" },
-      { "name": "shovill", "url": "ghcr.io/genpat-it/shovill:1.1.0--d84470570e" },
-      { "name": "snippy", "url": "ghcr.io/genpat-it/snippy:4.5.1--7be4a1c45a" },
-      { "name": "resfinder", "url": "ghcr.io/genpat-it/resfinder:4.1.5--858219071c" },
-      { "name": "mlst", "url": "ghcr.io/genpat-it/mlst-w-db:2.23.0--60b8b2e3dd_231219.124455" },
-      { "name": "chewbbaca", "url": "ghcr.io/genpat-it/chewbbaca-w-chewie-schemas:2.8.5--16b816c96d" },
-      { "name": "bowtie2", "url": "ghcr.io/genpat-it/bowtie2:2.1.0--37ad014737" },
-      { "name": "mash", "url": "ghcr.io/genpat-it/mash:2.3--debdd7eb23" },
-      { "name": "spades", "url": "quay.io/biocontainers/spades:3.11.1--py27_zlib1.2.8_0" },
-      { "name": "kraken2", "url": "quay.io/biocontainers/kraken2:2.1.2--pl5262h7d875b9_0" },
-      { "name": "prokka", "url": "quay.io/biocontainers/prokka:1.14.5--pl526_1" },
-      { "name": "quast", "url": "quay.io/biocontainers/quast:4.4--boost1.61_1" },
-      { "name": "flye", "url": "quay.io/biocontainers/flye:2.9.2--py310h2b6aa90_2" },
-      { "name": "chopper", "url": "quay.io/biocontainers/chopper:0.7.0--hdcf5f25_0" },
-      { "name": "minimap2", "url": "quay.io/biocontainers/minimap2:2.26--he4a0461_1" },
-      { "name": "biopython", "url": "quay.io/biocontainers/biopython:1.78" },
-      { "name": "abricate", "url": "quay.io/biocontainers/abricate:0.9.8--h1341992_0" },
-      { "name": "fastqc", "url": "biocontainers/fastqc:v0.11.5_cv4" }
-    ],
     "helper_functions": [
       {
         "name": "parseMetadataFromFileName",

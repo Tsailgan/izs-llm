@@ -55,11 +55,10 @@ def _inject_template(template_id, found_ids, context_blocks, store: BaseStore, e
 
     block = f"""
 --- TEMPLATE: {template_id} ---
-NAME: {tmpl_data.get('template_name', 'Unknown')}
+ID: {tmpl_data.get('id', 'Unknown')}
 DESCRIPTION: {tmpl_data.get('description', 'No description')}
-COMPATIBLE SQS: {', '.join(tmpl_data.get('compatible_seq_types', []))}
-INPUTS: {', '.join(tmpl_data.get('accepted_inputs', []))}
-OUTPUTS: {', '.join(tmpl_data.get('outputs', []))}
+INPUTS: {', '.join(tmpl_data.get('input_channels', []))}
+OUTPUTS: {', '.join(tmpl_data.get('output_channels', []))}
 """
 
     if embed_code:
@@ -281,8 +280,8 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
             
             for tmpl in store.search(("templates",)):
                 t_data = tmpl.value
-                t_name = t_data.get('template_name', tmpl.key)
-                outputs = t_data.get('outputs', [])
+                t_name = t_data.get('id', tmpl.key)
+                outputs = t_data.get('output_channels', [])
                 out_str = f" *(Generates: {', '.join(outputs)})*" if outputs else ""
                 suggestion_block += f"- **{t_name}**{out_str}\n"
             
@@ -348,18 +347,8 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                 _inject_template(tmpl_key, found_ids, context_blocks, store, embed_code=True)
                 
                 tmpl_data = store.get(("templates",), tmpl_key).value
-                for flow_step in tmpl_data.get('logic_flow', []):
-                    if 'step' in flow_step: 
-                        _inject_component(flow_step['step'], found_ids, context_blocks, store, embed_code)
-                    for sub_key in ['parallel_execution', 'branches', 'options']:
-                        if sub_key in flow_step:
-                            for item in flow_step[sub_key]:
-                                if 'step' in item:
-                                    _inject_component(item['step'], found_ids, context_blocks, store, embed_code)
-                                if 'next' in item:
-                                    for sub_item in item['next']:
-                                        if 'step' in sub_item:
-                                            _inject_component(sub_item['step'], found_ids, context_blocks, store, embed_code)
+                for step_id in tmpl_data.get('steps_used', []):
+                    _inject_component(step_id, found_ids, context_blocks, store, embed_code)
     except Exception as e:
         print(f"Template search error: {e}")
 
@@ -397,7 +386,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                         score += 5
                         
             # Lower weight for I/O types to avoid flooding
-            io_combined = comp_data.get('input_types', []) + comp_data.get('out', [])
+            io_combined = comp_data.get('input_channels', []) + comp_data.get('output_channels', [])
             for io_val in io_combined:
                 for io_word in str(io_val).lower().replace('_', ' ').split():
                     if len(io_word) > 3 and io_word in query_tokens and io_word not in ignore_words:
@@ -534,18 +523,8 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                         _inject_template(tmpl['id'], found_ids, context_blocks, store, embed_code=True)
                         found_ids.add(item_id)
 
-                        for flow_step in tmpl.get('logic_flow', []):
-                            if 'step' in flow_step:
-                                _inject_component(flow_step['step'], found_ids, context_blocks, store, embed_code)
-                            for sub_key in ['parallel_execution', 'branches', 'options']:
-                                if sub_key in flow_step:
-                                    for item in flow_step[sub_key]:
-                                        if 'step' in item:
-                                            _inject_component(item['step'], found_ids, context_blocks, store, embed_code)
-                                        if 'next' in item:
-                                            for sub_item in item['next']:
-                                                if 'step' in sub_item:
-                                                    _inject_component(sub_item['step'], found_ids, context_blocks, store, embed_code)
+                        for step_id in tmpl.get('steps_used', []):
+                            _inject_component(step_id, found_ids, context_blocks, store, embed_code)
 
                 elif item_type == 'component':
                     _inject_component(item_id, found_ids, context_blocks, store, embed_code)
