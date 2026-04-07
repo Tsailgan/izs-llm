@@ -1,6 +1,19 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
+from pathlib import Path
 from typing import List, Optional
+import difflib
+
+# ──────────────────────────────────────────────────────────────────────────────
+# FRAMEWORK CONSTRAINT: Load valid component names directly from the filesystem
+# ──────────────────────────────────────────────────────────────────────────────
+from app.core.config import settings
+FRAMEWORK_DIR = settings.FRAMEWORK_DIR
+
+FRAMEWORK_MODULES = {f.stem for f in (FRAMEWORK_DIR / "modules").glob("*.nf")} if (FRAMEWORK_DIR / "modules").exists() else set()
+FRAMEWORK_STEPS = {f.stem for f in (FRAMEWORK_DIR / "steps").glob("*.nf")} if (FRAMEWORK_DIR / "steps").exists() else set()
+FRAMEWORK_MULTI = {f.stem for f in (FRAMEWORK_DIR / "multi").glob("*.nf")} if (FRAMEWORK_DIR / "multi").exists() else set()
+FRAMEWORK_COMPONENTS = FRAMEWORK_MODULES | FRAMEWORK_STEPS | FRAMEWORK_MULTI
 
 class ImportItem(BaseModel):
     module_path: str = Field(
@@ -266,6 +279,37 @@ class WorkflowBlock(BaseModel):
                     f"Either use it, emit it directly, or remove it from take_channels."
                 )
         return self
+
+    @field_validator('name')
+    def validate_workflow_name_against_framework(cls, v):
+        """Block sub-workflow names that use reserved prefixes but don't exist in the framework."""
+        
+        if v.startswith('module_') and v not in FRAMEWORK_MODULES:
+            matches = difflib.get_close_matches(v, FRAMEWORK_MODULES, n=3, cutoff=0.5)
+            suggestions = f" Did you mean: {', '.join(matches)}?" if matches else ""
+            raise ValueError(
+                f"HALLUCINATION DETECTED: Sub-workflow name '{v}' uses the 'module_' prefix "
+                f"but does NOT exist in the cohesive-ngsmanager framework.\n"
+                f"CRITICAL REPAIR INSTRUCTIONS:\n"
+                f"1. If this is a custom sub-workflow, rename it with a 'wf_' prefix (e.g., 'wf_{v[7:]}').\n"
+                f"2. If this wraps a single tool, DELETE the sub-workflow and call the tool directly in the entrypoint.\n"
+                f"3. Only use 'module_' names for EXISTING framework templates.{suggestions}\n"
+            )
+        if v.startswith('step_') and v not in FRAMEWORK_STEPS:
+            matches = difflib.get_close_matches(v, FRAMEWORK_STEPS, n=3, cutoff=0.5)
+            suggestions = f" Did you mean: {', '.join(matches)}?" if matches else ""
+            raise ValueError(
+                f"HALLUCINATION DETECTED: '{v}' is not a valid step in the framework.{suggestions}\n"
+                f"Sub-workflows cannot use 'step_' prefix — steps are imported, not defined."
+            )
+        if v.startswith('multi_') and v not in FRAMEWORK_MULTI:
+            matches = difflib.get_close_matches(v, FRAMEWORK_MULTI, n=3, cutoff=0.5)
+            suggestions = f" Did you mean: {', '.join(matches)}?" if matches else ""
+            raise ValueError(
+                f"HALLUCINATION DETECTED: '{v}' is not a valid multi-tool in the framework.{suggestions}\n"
+                f"Sub-workflows cannot use 'multi_' prefix — multi-tools are imported, not defined."
+            )
+        return v
 
     @model_validator(mode='after')
     def forbid_recursion(self):
@@ -590,6 +634,37 @@ class NextflowPipelineAST(BaseModel):
             new_imports.append(ImportItem(module_path=path, functions=sorted(funcs)))
             
         self.imports = new_imports
+        return self
+
+    @model_validator(mode='after')
+    def enforce_framework_components(self):
+        """Ensures ALL step_*/multi_*/module_* references in generated code exist in the framework."""
+        all_code = self.entrypoint.body_code
+        for sw in self.sub_workflows:
+            all_code += "\n" + sw.body_code
+
+        # Find all step_*, multi_*, and module_* calls in the code
+        referenced = set(re.findall(r'\b((?:step_|multi_|module_)[a-zA-Z0-9_]+)\s*\(', all_code))
+
+        # Exclude sub-workflows defined in this AST (they're local, not framework imports)
+        defined_sws = {sw.name for sw in self.sub_workflows}
+        referenced -= defined_sws
+
+        invalid = referenced - FRAMEWORK_COMPONENTS
+        if invalid:
+            error_details = []
+            for item in sorted(invalid):
+                matches = difflib.get_close_matches(item, FRAMEWORK_COMPONENTS, n=3, cutoff=0.5)
+                suggestion = f" (Did you mean: {', '.join(matches)}?)" if matches else ""
+                error_details.append(f"  - {item}{suggestion}")
+            details_str = "\n".join(error_details)
+            
+            raise ValueError(
+                f"FRAMEWORK CONSTRAINT VIOLATION: The following components do NOT exist "
+                f"in cohesive-ngsmanager and cannot be used:\n"
+                f"{details_str}\n\n"
+                f"REPAIR: Replace them with valid framework components or remove them.\n"
+            )
         return self
 
     @model_validator(mode='after')
