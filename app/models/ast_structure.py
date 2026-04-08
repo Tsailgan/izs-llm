@@ -15,6 +15,10 @@ FRAMEWORK_STEPS = {f.stem for f in (FRAMEWORK_DIR / "steps").glob("*.nf")} if (F
 FRAMEWORK_MULTI = {f.stem for f in (FRAMEWORK_DIR / "multi").glob("*.nf")} if (FRAMEWORK_DIR / "multi").exists() else set()
 FRAMEWORK_COMPONENTS = FRAMEWORK_MODULES | FRAMEWORK_STEPS | FRAMEWORK_MULTI
 
+print(f"DEBUG: Loaded FRAMEWORK_MODULES ({len(FRAMEWORK_MODULES)}): {FRAMEWORK_MODULES}")
+print(f"DEBUG: Loaded FRAMEWORK_STEPS ({len(FRAMEWORK_STEPS)}): {FRAMEWORK_STEPS}")
+print(f"DEBUG: Loaded FRAMEWORK_MULTI ({len(FRAMEWORK_MULTI)}): {FRAMEWORK_MULTI}")
+
 class ImportItem(BaseModel):
     module_path: str = Field(
         description="Path to the module. MUST start with '../steps/' or '../functions/'. NEVER use 'nf-core'."
@@ -283,7 +287,7 @@ class WorkflowBlock(BaseModel):
     @field_validator('name')
     def validate_workflow_name_against_framework(cls, v):
         """Block sub-workflow names that use reserved prefixes but don't exist in the framework."""
-        
+
         if v.startswith('module_') and v not in FRAMEWORK_MODULES:
             matches = difflib.get_close_matches(v, FRAMEWORK_MODULES, n=3, cutoff=0.5)
             suggestions = f" Did you mean: {', '.join(matches)}?" if matches else ""
