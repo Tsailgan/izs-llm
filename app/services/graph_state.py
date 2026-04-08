@@ -18,7 +18,8 @@ class GraphState(TypedDict):
     # --- Architect & Renderer State ---
     ast_json: Optional[Dict[str, Any]]
     nextflow_code: Optional[str]
-    mermaid_code: Optional[str]
+    mermaid_agent: Optional[str]
+    mermaid_deterministic: Optional[str]
     
     # --- Memory & Errors ---
     error: Optional[str]

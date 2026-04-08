@@ -1,10 +1,10 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
-from langchain_core.messages import RemoveMessage, trim_messages
+from langchain_core.messages import RemoveMessage, trim_messages, SystemMessage, AIMessage
 
 from app.services.graph_state import GraphState
-from app.services.agents import consultant_node, hydrator_node, architect_node, diagram_node
+from app.services.agents import consultant_node, hydrator_node, architect_node, diagram_node, deterministic_diagram_node
 from app.services.repair import repair_node, should_repair
 from app.services.renderer import renderer_node
 
@@ -13,23 +13,6 @@ def check_consultant_status(state: GraphState):
         return "approved"
     return "chatting"
 
-def delete_messages_node(state: GraphState):
-    messages = state.get("messages", [])
-    if len(messages) <= 6:
-        return {}
-        
-    trimmed_messages = trim_messages(
-        messages,
-        max_tokens=6,
-        strategy="last",
-        token_counter=len,
-        include_system=True
-    )
-    
-    trimmed_ids = {m.id for m in trimmed_messages}
-    delete_actions = [RemoveMessage(id=m.id) for m in messages if m.id not in trimmed_ids]
-    
-    return {"messages": delete_actions} if delete_actions else {}
 
 def delete_messages_node(state: GraphState):
     messages = state.get("messages", [])
@@ -82,6 +65,7 @@ def build_execution_subgraph():
     sub.add_node("repair", repair_node)
     sub.add_node("renderer", renderer_node)
     sub.add_node("diagram", diagram_node)
+    sub.add_node("deterministic_diagram", deterministic_diagram_node)
     
     sub.set_entry_point("hydrator")
     sub.add_edge("hydrator", "architect")
@@ -97,7 +81,9 @@ def build_execution_subgraph():
     )
     
     sub.add_edge("repair", "architect")
+    sub.add_edge("renderer", "deterministic_diagram")
     sub.add_edge("renderer", "diagram")
+    sub.add_edge("deterministic_diagram", END)
     sub.add_edge("diagram", END)
     
     return sub.compile()

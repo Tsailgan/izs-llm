@@ -17,7 +17,8 @@ class ChatResponse(BaseModel):
     status: str
     reply: str
     nextflow_code: Optional[str] = None
-    mermaid_code: Optional[str] = None
+    mermaid_agent: Optional[str] = None
+    mermaid_deterministic: Optional[str] = None
     ast_json: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
@@ -91,12 +92,16 @@ async def chat_with_agent(request: ChatRequest):
         nf_code = result.get("nextflow_code")
         ast_json = result.get("ast_json")
         mermaid = result.get("mermaid_code")
+        mermaid_agent = result.get("mermaid_agent")
+        mermaid_deterministic = result.get("mermaid_deterministic")
         
         return ChatResponse(
             status=status,
             reply=ai_reply,
             nextflow_code=nf_code,
             mermaid_code=mermaid,
+            mermaid_agent=mermaid_agent,
+            mermaid_deterministic=mermaid_deterministic,
             ast_json=ast_json,
             error=None
         )
