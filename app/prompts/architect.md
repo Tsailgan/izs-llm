@@ -205,9 +205,8 @@ module_segmented(ch_ready.reads, ch_ready.refs)
 
 # 5. Pipeline Design Rules
 
-- **NEVER invent `module_` names.** The `module_` prefix is RESERVED for existing framework templates (e.g. `module_covid_emergency`, `module_denovo`). If you need a custom sub-workflow, use a `wf_` prefix (e.g. `wf_deplete_and_map`).
-- **Group** related steps (2+) into sub-workflows only when they share data-shaping logic. Use `wf_` prefix for custom names.
-- **No single-process wrappers**: if a step is one tool call, invoke it DIRECTLY in the entrypoint. Do NOT wrap it in a sub-workflow. Example: `step_4TY_MLST__mlst(assembly)` goes in entrypoint, NOT inside a `wf_mlst` wrapper.
+- **Group** related steps into cohesive modules (e.g., `module_deplete_and_map`).
+- **No single-process wrappers**: if a step is one tool, call it directly in the entrypoint.
 - **No double shaping**: if Workflow A already crossed reads+refs, Workflow B must not cross again.
 - **One shaping strategy** per data stream — either local (inside sub-workflow) or global (prepare_inputs). Not both.
 - **Entrypoint** = orchestrator only. Instantiate channels, connect modules. Cannot emit.

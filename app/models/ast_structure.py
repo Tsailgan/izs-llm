@@ -286,37 +286,6 @@ class WorkflowBlock(BaseModel):
                 )
         return self
 
-    @field_validator('name')
-    def validate_workflow_name_against_framework(cls, v):
-        """Block sub-workflow names that use reserved prefixes but don't exist in the framework."""
-
-        if v.startswith('module_') and v not in FRAMEWORK_MODULES:
-            matches = difflib.get_close_matches(v, FRAMEWORK_MODULES, n=3, cutoff=0.5)
-            suggestions = f" Did you mean: {', '.join(matches)}?" if matches else ""
-            raise ValueError(
-                f"HALLUCINATION DETECTED: Sub-workflow name '{v}' uses the 'module_' prefix "
-                f"but does NOT exist in the cohesive-ngsmanager framework.\n"
-                f"CRITICAL REPAIR INSTRUCTIONS:\n"
-                f"1. If this is a custom sub-workflow, rename it with a 'wf_' prefix (e.g., 'wf_{v[7:]}').\n"
-                f"2. If this wraps a single tool, DELETE the sub-workflow and call the tool directly in the entrypoint.\n"
-                f"3. Only use 'module_' names for EXISTING framework templates.{suggestions}\n"
-            )
-        if v.startswith('step_') and v not in FRAMEWORK_STEPS:
-            matches = difflib.get_close_matches(v, FRAMEWORK_STEPS, n=3, cutoff=0.5)
-            suggestions = f" Did you mean: {', '.join(matches)}?" if matches else ""
-            raise ValueError(
-                f"HALLUCINATION DETECTED: '{v}' is not a valid step in the framework.{suggestions}\n"
-                f"Sub-workflows cannot use 'step_' prefix — steps are imported, not defined."
-            )
-        if v.startswith('multi_') and v not in FRAMEWORK_MULTI:
-            matches = difflib.get_close_matches(v, FRAMEWORK_MULTI, n=3, cutoff=0.5)
-            suggestions = f" Did you mean: {', '.join(matches)}?" if matches else ""
-            raise ValueError(
-                f"HALLUCINATION DETECTED: '{v}' is not a valid multi-tool in the framework.{suggestions}\n"
-                f"Sub-workflows cannot use 'multi_' prefix — multi-tools are imported, not defined."
-            )
-        return v
-
     @model_validator(mode='after')
     def forbid_recursion(self):
         if self.name and self.body_code:
