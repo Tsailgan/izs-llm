@@ -5,6 +5,8 @@ services:
     restart: always
     environment:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+    volumes:
+      - ../cohesive-ngsmanager-cli:/cohesive-ngsmanager-cli
 
   # The HTTPS Server
   caddy:
