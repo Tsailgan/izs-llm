@@ -125,18 +125,13 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
         "    classDef operator fill:#9013FE,stroke:#6608B8,stroke-width:2px,color:#fff,rx:5px,ry:5px;",
         "    classDef global fill:#9B9B9B,stroke:#656565,stroke-width:2px,color:#fff,rx:5px,ry:5px;"
     ]
-    nodes = []   # (id, label, shape, subgraph)
-    edges = []   # (source, target, label)
+    nodes = []
+    edges = []
     node_ids = set()
-    instance_counts = {} # Track call counts for unique IDs
+    instance_counts = {}
 
-    # Maps scope to {var_name: node_id} for tracking data flow
-    # Each entry in scope_vars[scope] is the LATEST node id for that variable
     scope_vars = {}
-    
-    # Maps sub-workflow name to list of take_channel node_ids in order
     sw_take_ids = {}
-    # Maps sub-workflow name to list of first process call node_ids
     sw_first_nodes = {}
 
     known_procs = set()
@@ -147,6 +142,9 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
             
     for ip in ast_json.get('inline_processes', []):
         known_procs.add(ip.get('name', ''))
+        
+    for sw in ast_json.get('sub_workflows', []):
+        known_procs.add(sw.get('name', 'unknown'))
 
     def _is_process_call(name):
         if name.startswith(('step_', 'module_', 'multi_', 'wf_')):
@@ -168,7 +166,6 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
         return _safe_id(f"n_{scope}_{name}_{count}")
 
     def _resolve_var(scope, var_name):
-        """Find the node_id for a variable name."""
         v = scope_vars.get(scope, {}).get(var_name)
         if v:
             return v
@@ -177,7 +174,6 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
         return None
 
     def _split_args(args_str):
-        """Split function arguments and respect nested braces."""
         if not args_str.strip():
             return []
         depth = 0
@@ -200,7 +196,6 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
         return [p for p in parts if p]
 
     def _parse_expression(scope, expr):
-        """Parse an expression chain, add nodes, and return (end_node_id, label)."""
         expr = expr.strip()
         if not expr: return None, ""
         
@@ -248,15 +243,25 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
         
         current_label = ""
         for p in parts[1:]:
-            m = re.match(r'^([a-zA-Z0-9_]+)(?:\s*\((.*)\)\s*(?=$|\.|\s))?', p)
-            if not m:
-                m2 = re.match(r'^([a-zA-Z0-9_]+)', p)
-                if m2: current_label = m2.group(1)
+            m2 = re.match(r'^([a-zA-Z0-9_]+)', p)
+            if not m2:
                 continue
+                
+            op = m2.group(1)
+            op_args = None
             
-            op = m.group(1)
-            op_args = m.group(2)
-            
+            paren_match = re.match(r'^[a-zA-Z0-9_]+\s*\(', p)
+            if paren_match:
+                start_idx = paren_match.end()
+                depth = 1
+                i = start_idx
+                while i < len(p) and depth > 0:
+                    if p[i] == '(': depth += 1
+                    elif p[i] == ')': depth -= 1
+                    i += 1
+                if depth == 0:
+                    op_args = p[start_idx:i-1]
+
             if op_args is None:
                 if op != 'out':
                     current_label = op
@@ -274,7 +279,6 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
         return current_id, current_label
 
     def _parse_body(body_code, scope_name):
-        """Line-by-line parsing of Nextflow logic blocks."""
         if not body_code: return
 
         scope_vars.setdefault(scope_name, {})
@@ -294,7 +298,6 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
                     scope_vars[scope_name][var_name] = end_node
                 continue
 
-            # Check process/subworkflow call
             m = re.match(r'(?:([a-zA-Z_]\w*)\s*=\s*)?([a-zA-Z0-9_]+)\s*\(', line)
             is_proc_call = False
             if m:
@@ -326,7 +329,6 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
                             edges.append((src_id, proc_id, src_label))
                     continue
 
-            # General assignment
             assign_match = re.match(r'([a-zA-Z_]\w*)\s*=\s*(.*)', line)
             if assign_match and not is_proc_call:
                 var_name = assign_match.group(1)
@@ -336,7 +338,6 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
                     scope_vars[scope_name][var_name] = end_node
                 continue
 
-    # --- Phase 1: Sub-workflows and Globals ---
     for g in ast_json.get('globals', []):
         gid = _safe_id(f"global_{g.get('name', 'unknown')}")
         _add_node(gid, f"{g.get('name', '?')}", "global")
@@ -356,17 +357,14 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
         sw_name = sw.get('name', 'unknown')
         _parse_body(sw.get('body_code', ''), sw_name)
 
-        # Connect take inputs to the first node in the workflow if no edges from them
         connected_sources = {e[0] for e in edges}
         first_nodes = sw_first_nodes.get(sw_name, [])
         if first_nodes:
-            # We connect inputs to all first process calls if they aren't used yet
             for t_id in sw_take_ids.get(sw_name, []):
                 if t_id not in connected_sources:
                     for f_id in first_nodes:
                         edges.append((t_id, f_id, ""))
 
-        # Output channels
         for em in sw.get('emit_channels', []):
             em_name = em.split('=')[0].strip() if '=' in em else em.strip()
             em_id = _safe_id(f"out_{sw_name}_{em_name}")
@@ -378,16 +376,13 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
             if source:
                 edges.append((source, em_id, ""))
 
-    # --- Phase 2: Entrypoint ---
     ep = ast_json.get('entrypoint', {})
     if ep:
         ep_body = ep.get('body_code', '')
         _parse_body(ep_body, 'entrypoint')
 
-        # Connect entrypoint calls to sub-workflow inputs
         for sw in ast_json.get('sub_workflows', []):
             sw_name = sw.get('name', 'unknown')
-            # Look for calls to this subworkflow
             matches = re.finditer(rf'{re.escape(sw_name)}\s*\(([^)]*)\)', ep_body)
             for m in matches:
                 args = _split_args(m.group(1))
@@ -399,7 +394,6 @@ def render_mermaid_from_ast(ast_json: dict) -> str:
                         if source:
                             edges.append((source, take_ids[i], ""))
 
-    # --- Phase 3: Final Render ---
     by_subgraph = {}
     no_subgraph = []
     for nid, label, shape, sg in nodes:
