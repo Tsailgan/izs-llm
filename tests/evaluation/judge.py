@@ -3,15 +3,15 @@ tests/evaluation/judge.py
 LLM Judge — invokes the evaluation prompts against a Groq-hosted LLM
 to score the AI agent's outputs.
 
-Usage:
-    from tests.evaluation.judge import get_judge, judge_consultant, judge_pipeline, ...
+Uses the same get_judge_llm() pattern from app/services/llm.py but with
+graceful degradation — if GROQ_API_KEY is missing, all judge functions
+return empty scores and tests still pass with deterministic assertions only.
 
-If GROQ_API_KEY is not set, all judge functions return empty scores
-with a warning — tests still pass, they just don't get LLM-scored.
+Usage:
+    from tests.evaluation.judge import judge_consultant, judge_pipeline, ...
 """
 import os
 from typing import Optional
-from langchain_groq import ChatGroq
 
 from tests.evaluation.schemas import (
     AcademicEval,
@@ -36,6 +36,9 @@ def get_judge():
     """
     Lazily initialize the Groq judge LLM.
     Returns None if GROQ_API_KEY is not set.
+
+    NOTE: conftest.py loads .env before this module is imported,
+    so os.environ will already have the keys if they exist in .env.
     """
     global _judge_llm, _judge_available
 
@@ -51,6 +54,9 @@ def get_judge():
         return None
 
     try:
+        # Import here to avoid import errors if langchain_groq is not installed
+        from langchain_groq import ChatGroq
+
         _judge_llm = ChatGroq(
             model="llama-3.3-70b-versatile",
             temperature=0.0,
