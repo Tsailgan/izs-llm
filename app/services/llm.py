@@ -2,7 +2,7 @@ import os
 import time
 from functools import wraps
 from langchain_mistralai import ChatMistralAI
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from app.core.config import settings
 
 def get_llm():
@@ -26,19 +26,16 @@ def get_llm():
     )
 
 def get_judge_llm(temperature=0.0):
-    """Returns the configured Groq LLM instance for judging/evaluations."""
-    api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    """Returns the configured LLM instance for judging/evaluations."""
+    base_url = os.environ.get("JUDGE_BASE_URL", "").strip()
     
-    if not api_key:
-        print("⚠️  Warning: GROQ_API_KEY is missing. Judge will be disabled.")
-        return None
-        
-    return ChatGroq(
-        model="llama-3.3-70b-versatile",
+    return ChatOpenAI(
+        base_url=base_url,
+        model="Qwen3-Coder-30B",
         temperature=temperature,
+        api_key="empty",
         max_retries=6,
-        timeout=60, 
-        api_key=api_key
+        timeout=240
     )
 
 def rate_limit_pause(seconds=20):
