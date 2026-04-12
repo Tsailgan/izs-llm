@@ -4,7 +4,7 @@ Session-scoped fixtures for the IZS test suite.
 
 Performs essential preflight checks before running tests:
   - MISTRAL_API_KEY is set (required for the agent)
-  - GROQ_API_KEY is set (optional for the judge)
+  - JUDGE_BASE_URL is set (optional for the judge)
   - FAISS index exists (required for RAG retrieval)
 
 Provides two complementary fixture paths:
@@ -33,10 +33,10 @@ def _preflight_checks():
             "  → Add it to .env or export it: export MISTRAL_API_KEY=your_key"
         )
 
-    # --- GROQ_API_KEY (optional — powers the judge) ---
-    if not os.environ.get("GROQ_API_KEY"):
+    # --- JUDGE_BASE_URL (optional — powers the judge) ---
+    if not os.environ.get("JUDGE_BASE_URL"):
         print(
-            "\n⚠️  GROQ_API_KEY is not set — LLM judge scoring will be SKIPPED.\n"
+            "\n⚠️  JUDGE_BASE_URL is not set — LLM judge scoring will be SKIPPED.\n"
             "   Tests will still run with deterministic assertions only.\n"
         )
 
@@ -103,7 +103,9 @@ def llm():
 
 @pytest.fixture(scope="session")
 def judge_llm():
-    """Session-scoped Groq judge LLM, or None if GROQ_API_KEY is missing."""
+    """Session-scoped judge LLM, or None if JUDGE_BASE_URL is missing."""
+    if not os.environ.get("JUDGE_BASE_URL"):
+        return None
     return get_judge_llm(temperature=0.0)
 
 

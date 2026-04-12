@@ -51,8 +51,8 @@ Every test that generates code is evaluated through **three independent layers**
 - **Stub run** (`nextflow run ... -stub`): validates channel wiring and data flow without executing real tools (L3, L5 only)
 - Error output is parsed through `error_patterns.py` (50+ regex patterns across 5 categories: syntax, channels, processes, DSL2-specific, and expected noise)
 
-### Layer 3: LLM Judge (when `GROQ_API_KEY` is set)
-- Uses `llama-3.3-70b-versatile` on Groq with structured Pydantic output
+### Layer 3: LLM Judge (when `JUDGE_BASE_URL` is set)
+- Uses `Qwen3-Coder-30B` on a custom endpoint with structured Pydantic output
 - Expert-calibrated 5-level rubrics for each test type:
   - **L1/L2**: Faithfulness to catalog + Relevance to biological scenario
   - **L3**: Nextflow DSL2 syntax + Pipeline logic + Diagram accuracy (both agentic and deterministic)
@@ -104,7 +104,7 @@ Tests require API keys for the agents and (optionally) the judge and compiler.
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `MISTRAL_API_KEY` | Yes | Powers the AI agents (Consultant/Architect) |
-| `GROQ_API_KEY` | Optional | Powers the LLM judge for automated scoring |
+| `JUDGE_BASE_URL` | Optional | Powers the LLM judge for automated scoring |
 | `NF_FRAMEWORK_DIR` | Optional | Path to local NF framework for syntax/stub validation |
 
 ## Report Output
