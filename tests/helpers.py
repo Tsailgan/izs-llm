@@ -28,7 +28,7 @@ DEFAULT_PAUSE_BETWEEN_TESTS = 15   # seconds between separate test scenarios
 DEFAULT_PAUSE_ON_ERROR = 30        # seconds to wait after a rate limit / server error
 
 
-def rate_limit_pause(seconds, reason="rate limit protection"):
+def rate_limit_pause(seconds=15, reason="rate limit protection"):
     """Pause execution for rate limit protection."""
     print(f"\n⏳ Pausing {seconds}s ({reason})...")
     time.sleep(seconds)
