@@ -44,9 +44,11 @@ def test_rag_retrieval(scenario, store):
     if missing:
         print(f"\n[FAIL] {scenario['id']} test_rag failed! Missing expected IDs: {missing}")
         print(f"Context snippet: {context[:500]}...")
+    else:
+        print(f"\n[OK] {scenario['id']} test_rag succeeded! Found expected IDs: {expected_ids}")
 
     report.add_result(
-        scenario_id=scenario["id"],
+        scenario_id=f"[RAG] {scenario['id']}",
         level=scenario["level"],
         success=passed,
         difficulty=scenario.get("difficulty", "—"),
@@ -57,6 +59,7 @@ def test_rag_retrieval(scenario, store):
             "expected": expected_ids,
             "missing": missing,
             "context_length": len(context),
+            "rag_context": context,
             "error": f"Missing components: {missing}" if missing else None,
         }
     )

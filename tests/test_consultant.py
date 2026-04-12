@@ -68,10 +68,10 @@ def test_consultant_logic(scenario, store, llm, judge_llm):
 
     if scenario.get("expect_strategy"):
         if result.strategy_selector != scenario["expect_strategy"]:
-            passed = False
+            # User noted: Strategy mismatch shouldn't fail the test as it can still be a correct agent logic path
             msg = f"Strategy mismatch: Expected {scenario['expect_strategy']}, got {result.strategy_selector}"
-            errors.append(msg)
             details["strategy_mismatch"] = msg
+            print(f"  ⚠️  [INFO] {msg}")
 
     if scenario.get("expect_template_id"):
         if result.used_template_id != scenario["expect_template_id"]:
@@ -108,7 +108,7 @@ def test_consultant_logic(scenario, store, llm, judge_llm):
         print(f"\n[FAIL] {scenario['id']} test_consultant failed:\n" + "\n".join(errors))
 
     report.add_result(
-        scenario_id=scenario["id"],
+        scenario_id=f"[Consultant] {scenario['id']}",
         level=scenario["level"],
         success=passed,
         difficulty=scenario.get("difficulty", "—"),

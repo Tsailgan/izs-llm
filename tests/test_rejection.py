@@ -90,7 +90,7 @@ def test_rejection_guardrail(scenario, store, llm, judge_llm):
         print(f"\n[FAIL] {scenario['id']} test_rejection failed:\n" + "\n".join(errors))
 
     report.add_result(
-        scenario_id=scenario["id"],
+        scenario_id=f"[Rejection] {scenario['id']}",
         level=scenario["level"],
         success=passed,
         difficulty=scenario.get("difficulty", "—"),

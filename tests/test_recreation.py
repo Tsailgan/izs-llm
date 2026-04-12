@@ -158,7 +158,7 @@ def test_code_recreation(scenario, store, judge_llm):
         print(f"\n[FAIL] {scenario['id']} test_recreation failed:\n" + "\n".join(errors))
 
     report.add_result(
-        scenario_id=scenario["id"],
+        scenario_id=f"[Recreation] {scenario['id']}",
         level=scenario["level"],
         success=passed,
         difficulty=scenario.get("difficulty", "—"),

@@ -303,6 +303,15 @@ class ReportCollector:
                     lines.append("")
 
                 # Code and Diagram Dropdowns
+                if det.get("rag_context"):
+                    lines.append("<details><summary>View Retrieved RAG Context</summary>")
+                    lines.append("")
+                    lines.append("```text")
+                    lines.append(str(det["rag_context"])[:3000] + "\n...(truncated)" if len(str(det["rag_context"])) > 3000 else str(det["rag_context"]))
+                    lines.append("```")
+                    lines.append("</details>")
+                    lines.append("")
+
                 if det.get("nf_code"):
                     lines.append("<details><summary>View Nextflow Code</summary>")
                     lines.append("")

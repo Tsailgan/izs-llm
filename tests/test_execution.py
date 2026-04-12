@@ -162,7 +162,7 @@ def test_execution_subgraph(scenario, store, judge_llm):
         print(f"\n[FAIL] {scenario['id']} test_execution failed:\n" + "\n".join(errors))
 
     report.add_result(
-        scenario_id=scenario["id"],
+        scenario_id=f"[Execution] {scenario['id']}",
         level=scenario["level"],
         success=passed,
         difficulty=scenario.get("difficulty", "—"),
