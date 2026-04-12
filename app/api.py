@@ -91,7 +91,6 @@ async def chat_with_agent(request: ChatRequest):
         status = result.get("consultant_status", "CHATTING")
         nf_code = result.get("nextflow_code")
         ast_json = result.get("ast_json")
-        mermaid = result.get("mermaid_code")
         mermaid_agent = result.get("mermaid_agent")
         mermaid_deterministic = result.get("mermaid_deterministic")
         
@@ -99,7 +98,6 @@ async def chat_with_agent(request: ChatRequest):
             status=status,
             reply=ai_reply,
             nextflow_code=nf_code,
-            mermaid_code=mermaid,
             mermaid_agent=mermaid_agent,
             mermaid_deterministic=mermaid_deterministic,
             ast_json=ast_json,

@@ -187,7 +187,7 @@ def diagram_node(state: GraphState):
     final_code = state.get("nextflow_code", "")
     if not final_code:
         print("[Diagram] Warning: No Nextflow code found.")
-        return {"mermaid_code": "flowchart TD\n    Empty[No code generated]"}
+        return {"mermaid_agent": "flowchart TD\n    Empty[No code generated]"}
 
     llm = get_llm()
     diagram_agent = llm.with_structured_output(DiagramData, method="json_schema", include_raw=False)
@@ -229,7 +229,7 @@ def deterministic_diagram_node(state: GraphState):
     ast_json = state.get("ast_json", {})
     if not ast_json:
         print("[Diagram] Warning: No AST found.")
-        return {"mermaid_code": "flowchart TD\n    Empty[No AST generated]"}
+        return {"mermaid_deterministic": "flowchart TD\n    Empty[No AST generated]"}
 
     try:
         mermaid_string = render_mermaid_from_ast(ast_json)
