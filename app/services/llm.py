@@ -7,10 +7,15 @@ from app.core.config import settings
 
 def get_llm():
     """Returns the configured Mistral LLM instance."""
-    api_key = os.getenv("MISTRAL_API_KEY")
+    # Use os.environ directly to ensure we get the latest values after dotenv load
+    api_key = os.environ.get("MISTRAL_API_KEY", "").strip()
+    
     if not api_key:
         print("❌ CRITICAL ERROR: MISTRAL_API_KEY is missing from environment variables!")
         raise ValueError("MISTRAL_API_KEY is not set.")
+    
+    # Debug: verify key length without exposing the key
+    print(f"[LLM] Initializing Mistral with key length: {len(api_key)}")
     
     return ChatMistralAI(
         model=settings.LLM_MODEL,
@@ -22,11 +27,11 @@ def get_llm():
 
 def get_judge_llm(temperature=0.0):
     """Returns the configured Groq LLM instance for judging/evaluations."""
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = os.environ.get("GROQ_API_KEY", "").strip()
     
     if not api_key:
-        print("❌ CRITICAL ERROR: GROQ_API_KEY is missing from environment variables!")
-        raise ValueError("GROQ_API_KEY is not set.")
+        print("⚠️  Warning: GROQ_API_KEY is missing. Judge will be disabled.")
+        return None
         
     return ChatGroq(
         model="llama-3.3-70b-versatile",

@@ -11,7 +11,19 @@ Design principles:
 All prompts are ChatPromptTemplate instances ready for use with
   `(prompt | judge_llm).invoke({...})`.
 """
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from app.services.agents import CONSULTANT_SYSTEM_PROMPT
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CONSULTANT TEST PROMPT — Direct agent invocation (mirrors production)
+# ══════════════════════════════════════════════════════════════════════════════
+
+CONSULTANT_TEST_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", CONSULTANT_SYSTEM_PROMPT + "\n\nAVAILABLE RAG CONTEXT\n{context}"),
+    MessagesPlaceholder(variable_name="messages")
+])
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════

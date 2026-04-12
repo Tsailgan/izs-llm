@@ -2,11 +2,18 @@
 tests/helpers.py
 Shared helper functions for the IZS test suite.
 
-Provides:
+API Helpers (for L1–L5 tests via /chat endpoint):
   - send_chat(): sends a message to the API and returns the parsed response
   - run_multi_turn_chat(): drives a full multi-turn conversation through the API
   - run_with_retries(): runs a test function up to N times, keeps the best result
   - rate_limit_pause(): sleeps between API calls to respect rate limits
+
+Isolated Helpers (for direct agent/judge invocation, no API):
+  - get_exact_context(): bypasses vector search, injects exact catalog items
+  - force_approve_consultant(): runs the agent chain directly with auto-retry
+  - run_academic_judge(): invokes the consultant LLM judge
+  - run_pipeline_judge(): invokes the Nextflow code LLM judge
+  - run_diagram_judge(): invokes the Mermaid diagram LLM judge
 """
 import time
 import uuid
@@ -216,3 +223,199 @@ def _avg_scores(scores: dict) -> float:
     """Calculate average of all score fields in a dict."""
     vals = [v for k, v in scores.items() if isinstance(v, (int, float)) and "score" in k]
     return round(sum(vals) / len(vals), 2) if vals else 0.0
+
+
+# ──────────────────────────────────────────────────────────────
+# Isolated Testing Helpers (Direct Invocation, No API)
+# ──────────────────────────────────────────────────────────────
+
+import pytest
+from langchain_core.messages import HumanMessage, AIMessage
+
+from app.services.tools import _inject_template, _inject_component
+from tests.evaluation.prompts import (
+    CONSULTANT_TEST_PROMPT,
+    JUDGE_PROMPT,
+    PIPELINE_JUDGE_PROMPT,
+    DIAGRAM_JUDGE_PROMPT,
+)
+from tests.evaluation.schemas import AcademicEval, ArchitectEval, DiagramEval, RejectionEval, CodeRecreationEval
+
+
+def get_exact_context(template_ids, component_ids, store):
+    """Bypasses vector search to inject exact catalog items for deterministic logic testing.
+
+    Pulls items directly from the InMemoryStore using the same
+    _inject_template / _inject_component functions used by the
+    production RAG pipeline, but skips all scoring and ranking.
+    """
+    found_ids = set()
+    context_blocks = []
+    for tid in template_ids:
+        _inject_template(tid, found_ids, context_blocks, store, embed_code=False)
+    for cid in component_ids:
+        _inject_component(cid, found_ids, context_blocks, store, embed_code=False)
+    return "\n".join(context_blocks) + "\n\n"
+
+
+def force_approve_consultant(agent, real_context, chat_history, max_attempts=3):
+    """Runs the consultant agent chain and auto-retries if it stays in CHATTING status.
+
+    Uses direct chain invocation (prompt | agent), matching the
+    production pattern from agents.py consultant_node.
+
+    Parameters
+    ----------
+    agent : Runnable
+        The LLM wrapped with `.with_structured_output(ConsultantOutput)`.
+    real_context : str
+        Deterministic RAG context from `get_exact_context`.
+    chat_history : list[BaseMessage]
+        The conversation messages to feed to the agent.
+    max_attempts : int
+        Maximum retries before failing the test.
+
+    Returns
+    -------
+    ConsultantOutput
+        The agent's structured output with status == APPROVED.
+    """
+    chain = CONSULTANT_TEST_PROMPT | agent
+    for attempt in range(max_attempts):
+        result = chain.invoke({"context": real_context, "messages": chat_history})
+
+        if result.status == "APPROVED":
+            return result
+
+        print(f"\n[Attempt {attempt+1}] Agent returned status '{result.status}'. Nudging for approval...")
+        chat_history.append(AIMessage(content=result.response_to_user))
+        chat_history.append(HumanMessage(content="I explicitly APPROVE this pipeline plan. I am ready to build. Please change your status to APPROVED and output the module IDs."))
+
+    pytest.fail(f"Agent stubbornly refused to approve after {max_attempts} attempts. Final status: {result.status} | AI said: {result.response_to_user}")
+
+
+def run_academic_judge(judge_llm, real_context, chat_history, ai_reply):
+    """Runs the LLM judge for the Consultant (faithfulness + relevance).
+
+    Invokes the production-grade JUDGE_PROMPT with AcademicEval
+    structured output. Returns a dictionary of results.
+    """
+    judge = judge_llm.with_structured_output(AcademicEval)
+    formatted_chat = "\n".join([f"{m.type.capitalize()}: {m.content}" for m in chat_history])
+    evaluation = (JUDGE_PROMPT | judge).invoke({
+        "context": real_context,
+        "chat": formatted_chat,
+        "reply": ai_reply
+    })
+    
+    if not evaluation:
+        return {}
+        
+    print(f"\nFaithfulness {evaluation.faithfulness_score} - {evaluation.faithfulness_reason}")
+    print(f"Relevance {evaluation.relevance_score} - {evaluation.relevance_reason}")
+    return evaluation.model_dump()
+
+
+def run_pipeline_judge(judge_llm, design_plan, tech_context, nf_code, strategy=None):
+    """Runs the LLM judge for the rendered Nextflow code (syntax + logic)."""
+    judge = judge_llm.with_structured_output(ArchitectEval)
+    evaluation = (PIPELINE_JUDGE_PROMPT | judge).invoke({
+        "plan": design_plan,
+        "context": tech_context,
+        "code": nf_code
+    })
+    
+    if not evaluation:
+        return {}
+
+    print(f"\nSyntax {evaluation.syntax_score} - {evaluation.syntax_reason}")
+    print(f"Logic {evaluation.logic_score} - {evaluation.logic_reason}")
+    return evaluation.model_dump()
+
+
+def run_diagram_judge(judge_llm, tech_context, nf_code, mermaid_code, strategy):
+    """Runs the LLM judge for the generated Mermaid diagram (syntax + mapping)."""
+    judge = judge_llm.with_structured_output(DiagramEval)
+    evaluation = (DIAGRAM_JUDGE_PROMPT | judge).invoke({
+        "diagram_source": strategy,
+        "context": tech_context,
+        "nf_code": nf_code,
+        "mermaid_code": mermaid_code
+    })
+    
+    if not evaluation:
+        return {}
+
+    print(f"\nDiagram Syntax {evaluation.syntax_score} - {evaluation.syntax_reason}")
+    print(f"Diagram Mapping {evaluation.mapping_score} - {evaluation.mapping_reason}")
+    return evaluation.model_dump()
+
+def run_rejection_judge(judge_llm, prompt, rejection_reason, reply, status):
+    """Runs the LLM judge for Guardrail / Rejection logic."""
+    from tests.evaluation.prompts import REJECTION_JUDGE_PROMPT
+    judge = judge_llm.with_structured_output(RejectionEval)
+    evaluation = (REJECTION_JUDGE_PROMPT | judge).invoke({
+        "prompt": prompt,
+        "rejection_reason": rejection_reason,
+        "reply": reply,
+        "status": status,
+    })
+    
+    if not evaluation:
+        return {}
+        
+    print(f"\nRejection {evaluation.rejection_score} - {evaluation.rejection_reason}")
+    print(f"Alternative {evaluation.alternative_score} - {evaluation.alternative_reason}")
+    return evaluation.model_dump()
+    
+def run_recreation_judge(judge_llm, reference_code, generated_code):
+    """Runs the LLM judge for code recreation against a reference."""
+    from tests.evaluation.prompts import CODE_RECREATION_JUDGE_PROMPT
+    judge = judge_llm.with_structured_output(CodeRecreationEval)
+    evaluation = (CODE_RECREATION_JUDGE_PROMPT | judge).invoke({
+        "reference_code": reference_code,
+        "generated_code": generated_code,
+    })
+    
+    if not evaluation:
+        return {}
+        
+    print(f"\nStructural {evaluation.structural_score} - {evaluation.structural_reason}")
+    print(f"Channel {evaluation.channel_score} - {evaluation.channel_reason}")
+    return evaluation.model_dump()
+
+
+def build_test_execution_graph(store):
+    """Build the execution subgraph for direct isolated testing.
+
+    Mirrors the production build_execution_subgraph() from graph.py,
+    but compiles with an explicit store so hydrator_node can read catalog data.
+    """
+    from langgraph.graph import StateGraph, END
+    from app.services.graph_state import GraphState
+    from app.services.agents import hydrator_node, architect_node, diagram_node, deterministic_diagram_node
+    from app.services.repair import repair_node, should_repair
+    from app.services.renderer import renderer_node
+
+    builder = StateGraph(GraphState)
+    builder.add_node("hydrator", hydrator_node)
+    builder.add_node("architect", architect_node)
+    builder.add_node("repair", repair_node)
+    builder.add_node("renderer", renderer_node)
+    builder.add_node("diagram", diagram_node)
+    builder.add_node("deterministic_diagram", deterministic_diagram_node)
+
+    builder.set_entry_point("hydrator")
+    builder.add_edge("hydrator", "architect")
+    builder.add_conditional_edges(
+        "architect", should_repair,
+        {"success": "renderer", "repair": "repair", "fail": "renderer"}
+    )
+    builder.add_edge("repair", "architect")
+    builder.add_edge("renderer", "deterministic_diagram")
+    builder.add_edge("renderer", "diagram")
+    builder.add_edge("deterministic_diagram", END)
+    builder.add_edge("diagram", END)
+
+    return builder.compile(store=store)
+

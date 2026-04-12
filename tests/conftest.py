@@ -2,41 +2,30 @@
 tests/conftest.py
 Session-scoped fixtures for the IZS test suite.
 
-IMPORTANT: This file loads .env BEFORE any app imports.
-In Docker, docker-compose reads .env natively. But when running
-pytest locally (or in CI), we need to explicitly load it.
+Performs essential preflight checks before running tests:
+  - MISTRAL_API_KEY is set (required for the agent)
+  - GROQ_API_KEY is set (optional for the judge)
+  - FAISS index exists (required for RAG retrieval)
 
-Validates:
-  - MISTRAL_API_KEY is set (hard fail without it)
-  - GROQ_API_KEY is set (soft warning — tests run without judge)
-  - FAISS index exists (hard fail — RAG won't work without it)
+Provides two complementary fixture paths:
+  - api_client: Full API integration (L1–L5 tests via /chat endpoint)
+  - store + llm + judge_llm: Isolated direct invocation (bypasses API)
 """
 import os
 import sys
 from pathlib import Path
 
 # ──────────────────────────────────────────────────────────────
-# 1. Load .env BEFORE any app/test imports
-# ──────────────────────────────────────────────────────────────
-from dotenv import load_dotenv
-
-PROJECT_DIR = Path(__file__).parent.parent
-_env_path = PROJECT_DIR / ".env"
-
-if _env_path.exists():
-    load_dotenv(_env_path, override=False)  # don't override existing env vars
-    print(f"✅ Loaded .env from {_env_path}")
-else:
-    print(f"⚠️  No .env file found at {_env_path} — relying on environment variables")
-
-
-# ──────────────────────────────────────────────────────────────
-# 2. Validate required environment BEFORE heavy imports
+# 1. Preflight checks
 # ──────────────────────────────────────────────────────────────
 def _preflight_checks():
     """Fail fast with clear messages instead of cryptic 401s."""
     errors = []
 
+    # FAISS and Keys are validated via app.core.config side-effects mostly,
+    # but we do an explicit check here for the test environment.
+    from app.core.config import settings
+    
     # --- MISTRAL_API_KEY (required — powers the agent) ---
     if not os.environ.get("MISTRAL_API_KEY"):
         errors.append(
@@ -52,7 +41,6 @@ def _preflight_checks():
         )
 
     # --- FAISS index (required — RAG retrieval) ---
-    from app.core.config import settings
     faiss_path = Path(settings.FAISS_INDEX_PATH)
     if not faiss_path.exists():
         errors.append(
@@ -76,14 +64,62 @@ _preflight_checks()
 
 
 # ──────────────────────────────────────────────────────────────
-# 3. Now safe to import the app and test utilities
+# 2. Now safe to import the app and test utilities
 # ──────────────────────────────────────────────────────────────
 import pytest
 from fastapi.testclient import TestClient
+from langgraph.store.memory import InMemoryStore
 
 from app.api import app
+from app.core.loader import data_loader
+from app.services.llm import get_llm, get_judge_llm
 from tests.report import report
 
+
+# ──────────────────────────────────────────────────────────────
+# 3. Isolated testing fixtures (direct invocation, no API)
+# ──────────────────────────────────────────────────────────────
+
+@pytest.fixture(scope="session")
+def store():
+    """Session-scoped InMemoryStore with the full catalog loaded.
+
+    Mirrors the exact loading path used by the production API lifespan
+    (data_loader.load_all), but into a standalone store that tests can
+    pass directly to agents, hydrators, and helper functions.
+    """
+    _store = InMemoryStore()
+    print("\n📦 Loading the real vector store and catalog for testing...")
+    data_loader.load_all(store=_store)
+    print("✅ Database loaded successfully.")
+    return _store
+
+
+@pytest.fixture(scope="session")
+def llm():
+    """Session-scoped Mistral LLM instance — same factory as production."""
+    return get_llm()
+
+
+@pytest.fixture(scope="session")
+def judge_llm():
+    """Session-scoped Groq judge LLM, or None if GROQ_API_KEY is missing."""
+    return get_judge_llm(temperature=0.0)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_database(store):
+    """Automatically loads the real vector store and catalog for the test session.
+
+    This is autouse — it runs once per session before any test, ensuring
+    the store is populated even if no test explicitly requests it.
+    """
+    print("✅ Database ready for testing.")
+
+
+# ──────────────────────────────────────────────────────────────
+# 4. API integration fixtures (existing)
+# ──────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="session")
 def api_client():
