@@ -104,7 +104,11 @@ def test_execution_subgraph(scenario, store, judge_llm):
         # Run stub only for complex scenarios (level >= 3)
         val_res = validate_nextflow(nf_code, run_stub=(scenario["level"] >= 3))
         details.update(val_res)
-        if val_res.get("nf_syntax_passed") == False or val_res.get("nf_stub_passed") == False:
+        if val_res.get("nf_syntax_passed") == False:
+            errors.append(f"Nextflow Syntax Check Failed: {val_res.get('nf_syntax_error', 'Unknown error')[:200]}")
+            passed = False
+        if val_res.get("nf_stub_passed") == False:
+            errors.append(f"Nextflow Stub Execution Failed: {val_res.get('nf_stub_error', 'Unknown error')[:200]}")
             passed = False
     except Exception as e:
         details["nf_validation_error"] = f"Skipped: {str(e)[:100]}"

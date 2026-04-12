@@ -158,9 +158,9 @@ class ReportCollector:
                 if not r["success"]:
                     err = "—"
                     if r["details"].get("errors"):
-                        err = "; ".join(r["details"]["errors"])[:100] + "..."
+                        err = "; ".join(r["details"]["errors"])[:200] + "..."
                     elif r["details"].get("error"):
-                        err = str(r["details"]["error"])[:100] + "..."
+                        err = str(r["details"]["error"])[:200] + "..."
                     
                     lines.append(f"| `{r['id']}` | {r['level']} | {err} |")
             lines.append("")
@@ -184,6 +184,13 @@ class ReportCollector:
             )
 
         lines.append("")
+
+        # Pre-calculate RAG status map for cross-referencing
+        rag_status_map = {}
+        for r in self.results:
+            if r["id"].startswith("[RAG]"):
+                base_id = r["id"].replace("[RAG] ", "")
+                rag_status_map[base_id] = "Passed ✅" if r["success"] else "Failed ❌"
 
         # ══════════════════════════════════════
         # DETAILED RESULTS PER LEVEL
@@ -216,7 +223,13 @@ class ReportCollector:
                 lines.append(f"|----------|-------|")
                 lines.append(f"| Difficulty | {r['difficulty']} |")
                 lines.append(f"| Time | {r['elapsed']:.1f}s |")
-                lines.append(f"| Result | {'Passed ✅' if r['success'] else 'Failed ❌'} |")
+                
+                # Cross-reference RAG status if available
+                base_id = r["id"].split("] ")[-1] if "]" in r["id"] else r["id"]
+                if not r["id"].startswith("[RAG]") and base_id in rag_status_map:
+                    lines.append(f"| RAG Status | {rag_status_map[base_id]} |")
+                    
+                lines.append(f"| Total Result | {'Passed ✅' if r['success'] else 'Failed ❌'} |")
 
                 det = r["details"]
 

@@ -38,12 +38,18 @@ def test_rag_retrieval(scenario, store):
     # ── Deterministic assertions ──
     missing = [eid for eid in expected_ids if eid not in context]
 
+    import re
+    # Extract IDs that were actually found in the context blocks
+    actual_found_ids = re.findall(r'--- (?:COMPONENT|TEMPLATE): ([\w\_\d]+) ---', context)
+    
     passed = len(missing) == 0
     scores = {"rag_precision": 1.0 if passed else 0.0}
 
     if missing:
-        print(f"\n[FAIL] {scenario['id']} test_rag failed! Missing expected IDs: {missing}")
-        print(f"Context snippet: {context[:500]}...")
+        print(f"\n[FAIL] {scenario['id']} test_rag failed!")
+        print(f"  Expected: {expected_ids}")
+        print(f"  Got:      {actual_found_ids}")
+        print(f"  Missing:  {missing}")
     else:
         print(f"\n[OK] {scenario['id']} test_rag succeeded! Found expected IDs: {expected_ids}")
 
@@ -57,10 +63,11 @@ def test_rag_retrieval(scenario, store):
         details={
             "query": query,
             "expected": expected_ids,
+            "actual": actual_found_ids,
             "missing": missing,
             "context_length": len(context),
             "rag_context": context,
-            "error": f"Missing components: {missing}" if missing else None,
+            "error": f"RAG Missing: {missing} (Expected {expected_ids}, Got {actual_found_ids})" if missing else None,
         }
     )
 
