@@ -14,7 +14,7 @@ from tests.helpers import (
     build_test_execution_graph,
     rate_limit_pause,
 )
-from tests.nf_validation import validate_nf_syntax
+from tests.nf_validation import validate_nextflow
 from tests.scenarios.level5_recreation import LEVEL5_SCENARIOS, REFERENCE_CODE
 from tests.report import report
 
@@ -78,13 +78,13 @@ def test_code_recreation(scenario, store, judge_llm):
 
     # ── Nextflow validation ──
     try:
-        syntax_result = validate_nf_syntax(nf_code)
-        details["nf_syntax_valid"] = syntax_result.get("valid", False)
-        if not syntax_result.get("valid"):
-            details["nf_syntax_error"] = syntax_result.get("error", "")[:300]
+        # Run stub for recreation (Level 5)
+        val_res = validate_nextflow(nf_code, run_stub=True)
+        details.update(val_res)
+        if val_res.get("nf_syntax_passed") == False or val_res.get("nf_stub_passed") == False:
             passed = False
     except Exception as e:
-        details["nf_syntax_check"] = f"Skipped: {str(e)[:100]}"
+        details["nf_validation_error"] = f"Skipped: {str(e)[:100]}"
 
     # ── LLM Judge: Code Recreation ──
     if judge_llm:
