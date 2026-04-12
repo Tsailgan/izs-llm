@@ -53,25 +53,32 @@ def test_consultant_logic(scenario, store, llm, judge_llm):
 
     # ── Deterministic assertions ──
     passed = True
+    errors = []
     details = {
         "status": result.status,
         "strategy": result.strategy_selector,
         "template_id": result.used_template_id,
         "module_ids": result.selected_module_ids,
-        "response": result.response_to_user[:200],
+        "ai_reply": result.response_to_user,
     }
 
-    assert result.status == "APPROVED", f"Expected APPROVED, got {result.status}"
+    if result.status != "APPROVED":
+        errors.append(f"Expected APPROVED status, got {result.status}")
+        passed = False
 
     if scenario.get("expect_strategy"):
         if result.strategy_selector != scenario["expect_strategy"]:
             passed = False
-            details["strategy_mismatch"] = f"Expected {scenario['expect_strategy']}, got {result.strategy_selector}"
+            msg = f"Strategy mismatch: Expected {scenario['expect_strategy']}, got {result.strategy_selector}"
+            errors.append(msg)
+            details["strategy_mismatch"] = msg
 
     if scenario.get("expect_template_id"):
         if result.used_template_id != scenario["expect_template_id"]:
             passed = False
-            details["template_mismatch"] = f"Expected {scenario['expect_template_id']}, got {result.used_template_id}"
+            msg = f"Template mismatch: Expected {scenario['expect_template_id']}, got {result.used_template_id}"
+            errors.append(msg)
+            details["template_mismatch"] = msg
 
     # ── LLM Judge (optional) ──
     scores = {}
@@ -96,6 +103,10 @@ def test_consultant_logic(scenario, store, llm, judge_llm):
             scores["judge_passed"] = 0.0
             details["judge_error"] = f"Judge failed: {str(e)}"
 
+    if errors:
+        details["errors"] = errors
+        print(f"\n[FAIL] {scenario['id']} test_consultant failed:\n" + "\n".join(errors))
+
     report.add_result(
         scenario_id=scenario["id"],
         level=scenario["level"],
@@ -107,3 +118,5 @@ def test_consultant_logic(scenario, store, llm, judge_llm):
     )
 
     rate_limit_pause()
+    
+    assert not errors, f"Consultant test failed:\n" + "\n".join(errors)

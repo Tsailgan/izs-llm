@@ -72,21 +72,32 @@ def test_execution_subgraph(scenario, store, judge_llm):
     error = final_state.get("error")
 
     passed = True
+    errors = []
+    
     details = {
-        "strategy": initial_state["strategy_selector"],
-        "template": initial_state["used_template_id"],
-        "modules": initial_state["selected_module_ids"],
-        "code_length": len(nf_code) if nf_code else 0,
+        "strategy": initial_state.get("strategy_selector"),
+        "template": initial_state.get("used_template_id"),
+        "modules": initial_state.get("selected_module_ids"),
+        "nf_code_length": len(nf_code) if nf_code else 0,
+        "nf_code": nf_code,
         "has_ast": bool(ast_json),
-        "has_mermaid_agent": bool(mermaid_agent),
-        "has_mermaid_det": bool(mermaid_det),
+        "mermaid_agent_length": len(mermaid_agent) if mermaid_agent else 0,
+        "mermaid_agent": mermaid_agent,
+        "mermaid_deterministic_length": len(mermaid_det) if mermaid_det else 0,
+        "mermaid_deterministic": mermaid_det,
         "error": error,
     }
     scores = {}
 
-    assert not error, f"Execution subgraph error: {error}"
-    assert nf_code and len(nf_code) > 50, "No Nextflow code generated"
-    assert ast_json, "No AST JSON generated"
+    if error:
+        errors.append(f"Execution subgraph error: {error}")
+        passed = False
+    if not nf_code or len(nf_code) <= 50:
+        errors.append("No Nextflow code generated")
+        passed = False
+    if not ast_json:
+        errors.append("No AST JSON generated")
+        passed = False
 
     # ── Nextflow compiler validation ──
     try:
@@ -146,6 +157,10 @@ def test_execution_subgraph(scenario, store, judge_llm):
                     scores[f"{source}_diagram_judge_passed"] = 0.0
                     details[f"{source}_diagram_judge_error"] = str(e)[:200]
 
+    if errors:
+        details["errors"] = errors
+        print(f"\n[FAIL] {scenario['id']} test_execution failed:\n" + "\n".join(errors))
+
     report.add_result(
         scenario_id=scenario["id"],
         level=scenario["level"],
@@ -157,3 +172,5 @@ def test_execution_subgraph(scenario, store, judge_llm):
     )
 
     rate_limit_pause()
+    
+    assert not errors, f"Test failed with errors:\n" + "\n".join(errors)

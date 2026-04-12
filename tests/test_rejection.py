@@ -46,20 +46,23 @@ def test_rejection_guardrail(scenario, store, llm, judge_llm):
 
     # ── Deterministic assertions ──
     passed = True
+    errors = []
     details = {
         "status": result.status,
-        "response": result.response_to_user[:300],
+        "ai_reply": result.response_to_user,
         "expected_rejection_reason": scenario["rejection_reason"],
     }
     scores = {}
 
-    assert result.status == "CHATTING", (
-        f"Agent APPROVED an invalid request! Expected CHATTING.\n"
-        f"Request: {scenario['chat_messages'][0]}\n"
-        f"Reply: {result.response_to_user[:200]}"
-    )
+    if result.status != "CHATTING":
+        passed = False
+        msg = f"Agent APPROVED an invalid request! Expected CHATTING, got {result.status}"
+        errors.append(msg)
 
-    assert not result.draft_plan or result.draft_plan.strip() == "", "Agent generated a plan for an invalid request."
+    if result.draft_plan and result.draft_plan.strip() != "":
+        passed = False
+        msg = "Agent generated a plan for an invalid request."
+        errors.append(msg)
 
     # ── LLM Judge: Rejection quality ──
     if judge_llm:
@@ -82,6 +85,10 @@ def test_rejection_guardrail(scenario, store, llm, judge_llm):
         except Exception as e:
             details["judge_error"] = str(e)[:200]
 
+    if errors:
+        details["errors"] = errors
+        print(f"\n[FAIL] {scenario['id']} test_rejection failed:\n" + "\n".join(errors))
+
     report.add_result(
         scenario_id=scenario["id"],
         level=scenario["level"],
@@ -93,3 +100,5 @@ def test_rejection_guardrail(scenario, store, llm, judge_llm):
     )
 
     rate_limit_pause()
+    
+    assert not errors, f"Rejection test failed:\n" + "\n".join(errors)

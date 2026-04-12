@@ -61,20 +61,35 @@ def test_code_recreation(scenario, store, judge_llm):
 
     # ── Extract outputs ──
     nf_code = final_state.get("nextflow_code", "")
+    mermaid_agent = final_state.get("mermaid_agent", "")
+    mermaid_det = final_state.get("mermaid_deterministic", "")
+    ast_json = final_state.get("ast_json", {})
     error = final_state.get("error")
 
     passed = True
+    errors = []
+    
     details = {
         "module_id": module_id,
-        "strategy": initial_state["strategy_selector"],
-        "code_length": len(nf_code) if nf_code else 0,
+        "strategy": initial_state.get("strategy_selector"),
+        "nf_code_length": len(nf_code) if nf_code else 0,
+        "nf_code": nf_code,
         "reference_length": len(reference_code),
+        "has_ast": bool(ast_json),
+        "mermaid_agent_length": len(mermaid_agent) if mermaid_agent else 0,
+        "mermaid_agent": mermaid_agent,
+        "mermaid_deterministic_length": len(mermaid_det) if mermaid_det else 0,
+        "mermaid_deterministic": mermaid_det,
         "error": error,
     }
     scores = {}
 
-    assert not error, f"Execution subgraph error: {error}"
-    assert nf_code and len(nf_code) > 50, f"No Nextflow code generated for {module_id}"
+    if error:
+        errors.append(f"Execution subgraph error: {error}")
+        passed = False
+    if not nf_code or len(nf_code) <= 50:
+        errors.append(f"No Nextflow code generated for {module_id}")
+        passed = False
 
     # ── Nextflow validation ──
     try:
@@ -138,6 +153,10 @@ def test_code_recreation(scenario, store, judge_llm):
                     scores[f"{source}_diagram_judge_passed"] = 0.0
                     details[f"{source}_diagram_judge_error"] = str(e)[:200]
 
+    if errors:
+        details["errors"] = errors
+        print(f"\n[FAIL] {scenario['id']} test_recreation failed:\n" + "\n".join(errors))
+
     report.add_result(
         scenario_id=scenario["id"],
         level=scenario["level"],
@@ -149,3 +168,5 @@ def test_code_recreation(scenario, store, judge_llm):
     )
 
     rate_limit_pause()
+    
+    assert not errors, f"Recreation test failed:\n" + "\n".join(errors)

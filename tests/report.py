@@ -144,8 +144,26 @@ class ReportCollector:
         pct = (total_pass / len(self.results) * 100) if self.results else 0
         lines.append(f"| **Passed** | {total_pass} ✅ ({pct:.0f}%) |")
         lines.append(f"| **Failed** | {total_fail} ❌ |")
+        lines.append(f"| **RAG Database** | ✅ LOADED (via `conftest.py`) |")
         lines.append(f"| **Retry Attempts** | Each test retried up to 3 times (best result kept) |")
         lines.append("")
+
+        # ── Failure Summary (Only shown if there are failures) ──
+        if total_fail > 0:
+            lines.append("### ❌ Failure Summary")
+            lines.append("")
+            lines.append("| Scenario ID | Level | Error |")
+            lines.append("|-------------|-------|-------|")
+            for r in self.results:
+                if not r["success"]:
+                    err = "—"
+                    if r["details"].get("errors"):
+                        err = "; ".join(r["details"]["errors"])[:100] + "..."
+                    elif r["details"].get("error"):
+                        err = str(r["details"]["error"])[:100] + "..."
+                    
+                    lines.append(f"| `{r['id']}` | {r['level']} | {err} |")
+            lines.append("")
 
         # ── Summary Table ──
         lines.append("### Results by Level")
@@ -275,7 +293,41 @@ class ReportCollector:
 
                 # Error info
                 if det.get("error"):
-                    lines.append(f"**Error:** `{det['error'][:300]}`")
+                    lines.append(f"**Error:** `{str(det['error'])[:300]}`")
+                    lines.append("")
+
+                if det.get("errors"):
+                    lines.append("**Errors:**")
+                    for err in det["errors"]:
+                        lines.append(f"- `{err}`")
+                    lines.append("")
+
+                # Code and Diagram Dropdowns
+                if det.get("nf_code"):
+                    lines.append("<details><summary>View Nextflow Code</summary>")
+                    lines.append("")
+                    lines.append("```groovy")
+                    lines.append(det["nf_code"])
+                    lines.append("```")
+                    lines.append("</details>")
+                    lines.append("")
+
+                if det.get("mermaid_agent"):
+                    lines.append("<details><summary>View Mermaid Diagram (AI)</summary>")
+                    lines.append("")
+                    lines.append("```mermaid")
+                    lines.append(det["mermaid_agent"])
+                    lines.append("```")
+                    lines.append("</details>")
+                    lines.append("")
+
+                if det.get("mermaid_deterministic"):
+                    lines.append("<details><summary>View Mermaid Diagram (Deterministic)</summary>")
+                    lines.append("")
+                    lines.append("```mermaid")
+                    lines.append(det["mermaid_deterministic"])
+                    lines.append("```")
+                    lines.append("</details>")
                     lines.append("")
 
         # ══════════════════════════════════════
