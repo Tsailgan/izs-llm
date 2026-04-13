@@ -29,6 +29,7 @@ LEVEL4_SCENARIOS = [
         "expect_rejection": True,
         "template_ids": [],
         "component_ids": ["step_2AS_mapping__bowtie", "step_2AS_mapping__minimap2", "step_2AS_mapping__ivar", "step_2AS_mapping__snippy"],
+        "expect_in_context": ["step_2AS_mapping__bowtie", "step_2AS_mapping__minimap2", "step_2AS_mapping__ivar", "step_2AS_mapping__snippy"],
         "rejection_reason": (
             "BWA and BWA-MEM2 are NOT available in this framework. "
             "Available mapping tools include: Bowtie2 (step_2AS_mapping__bowtie), "
@@ -47,6 +48,7 @@ LEVEL4_SCENARIOS = [
         "expect_rejection": True,
         "template_ids": [],
         "component_ids": ["step_2AS_denovo__flye", "step_2AS_hybrid__unicycler"],
+        "expect_in_context": ["step_2AS_denovo__flye", "step_2AS_hybrid__unicycler"],
         "rejection_reason": (
             "Canu is NOT available in this framework. "
             "Available long-read assemblers include: Flye (step_2AS_denovo__flye). "
@@ -64,6 +66,7 @@ LEVEL4_SCENARIOS = [
         "expect_rejection": True,
         "template_ids": [],
         "component_ids": ["step_4TY_lineage__pangolin", "step_4TY_MLST__mlst", "step_4TY_cgMLST__chewbbaca"],
+        "expect_in_context": ["step_4TY_lineage__pangolin", "step_4TY_MLST__mlst", "step_4TY_cgMLST__chewbbaca"],
         "rejection_reason": (
             "Pangolin (step_4TY_lineage__pangolin) is exclusively for SARS-CoV-2 lineage "
             "classification using the PANGO nomenclature. It CANNOT be applied to bacterial "
@@ -82,6 +85,7 @@ LEVEL4_SCENARIOS = [
         "expect_rejection": True,
         "template_ids": [],
         "component_ids": ["step_2AS_mapping__ivar", "step_2AS_denovo__spades", "step_2AS_denovo__shovill", "step_2AS_denovo__unicycler"],
+        "expect_in_context": ["step_2AS_mapping__ivar", "step_2AS_denovo__spades", "step_2AS_denovo__shovill", "step_2AS_denovo__unicycler"],
         "rejection_reason": (
             "iVar (step_2AS_mapping__ivar) is a reference-based consensus caller — it requires "
             "a reference genome and CANNOT perform de novo assembly. For de novo assembly: "
@@ -100,6 +104,7 @@ LEVEL4_SCENARIOS = [
         "expect_rejection": True,
         "template_ids": [],
         "component_ids": ["step_1PP_trimming__fastp", "step_1PP_trimming__trimmomatic", "step_1PP_trimming__chopper"],
+        "expect_in_context": ["step_1PP_trimming__fastp", "step_1PP_trimming__trimmomatic", "step_1PP_trimming__chopper"],
         "rejection_reason": (
             "TrimGalore is NOT available in this framework. "
             "Available trimming tools include: fastp (step_1PP_trimming__fastp), "
@@ -118,6 +123,7 @@ LEVEL4_SCENARIOS = [
         "expect_rejection": True,
         "template_ids": [],
         "component_ids": ["step_2AS_mapping__ivar", "step_2AS_mapping__snippy", "step_2AS_mapping__medaka"],
+        "expect_in_context": ["step_2AS_mapping__ivar", "step_2AS_mapping__snippy", "step_2AS_mapping__medaka"],
         "rejection_reason": (
             "GATK (Genome Analysis Toolkit) is NOT available in this framework. "
             "For variant calling/consensus: iVar (step_2AS_mapping__ivar), "

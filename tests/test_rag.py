@@ -14,9 +14,11 @@ from app.services.tools import retrieve_rag_context
 from tests.scenarios.level1_simple import LEVEL1_SCENARIOS
 from tests.scenarios.level2_medium import LEVEL2_SCENARIOS
 from tests.scenarios.level3_complex import LEVEL3_SCENARIOS
+from tests.scenarios.level4_guardrails import LEVEL4_SCENARIOS
+from tests.scenarios.level5_recreation import LEVEL5_SCENARIOS
 from tests.report import report
 
-ALL_SCENARIOS = LEVEL1_SCENARIOS + LEVEL2_SCENARIOS + LEVEL3_SCENARIOS
+ALL_SCENARIOS = LEVEL1_SCENARIOS + LEVEL2_SCENARIOS + LEVEL3_SCENARIOS + LEVEL4_SCENARIOS + LEVEL5_SCENARIOS
 
 @pytest.mark.parametrize(
     "scenario",

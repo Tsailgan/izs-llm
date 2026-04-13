@@ -66,6 +66,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_westnile",
         "selected_module_ids": ["step_4TY_lineage__westnile"],
+        "expect_in_context": ["module_westnile", "step_4TY_lineage__westnile"],
     },
     {
         "id": "L5_02_covid_emergency",
@@ -82,6 +83,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_covid_emergency",
         "selected_module_ids": ["step_2AS_mapping__ivar", "step_4TY_lineage__pangolin"],
+        "expect_in_context": ["module_covid_emergency", "step_2AS_mapping__ivar", "step_4TY_lineage__pangolin"],
     },
     {
         "id": "L5_03_denovo",
@@ -99,6 +101,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_denovo",
         "selected_module_ids": ["step_2AS_mapping__bowtie", "step_2AS_denovo__spades"],
+        "expect_in_context": ["module_denovo", "step_2AS_mapping__bowtie", "step_2AS_denovo__spades"],
     },
     {
         "id": "L5_04_typing_bacteria",
@@ -117,6 +120,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_typing_bacteria",
         "selected_module_ids": [],
+        "expect_in_context": ["module_typing_bacteria"],
     },
     {
         "id": "L5_05_draft_genome",
@@ -134,6 +138,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_draft_genome",
         "selected_module_ids": ["step_2AS_mapping__bowtie", "step_2AS_mapping__ivar"],
+        "expect_in_context": ["module_draft_genome", "step_2AS_mapping__bowtie", "step_2AS_mapping__ivar"],
     },
     {
         "id": "L5_06_wgs_bacteria",
@@ -149,6 +154,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_wgs_bacteria",
         "selected_module_ids": ["step_2AS_denovo__shovill"],
+        "expect_in_context": ["module_wgs_bacteria", "step_2AS_denovo__shovill"],
     },
     {
         "id": "L5_07_reads_processing",
@@ -165,6 +171,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_reads_processing",
         "selected_module_ids": [],
+        "expect_in_context": ["module_reads_processing"],
     },
     {
         "id": "L5_08_filtered_denovo",
@@ -181,6 +188,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_filtered_denovo",
         "selected_module_ids": ["step_2AS_mapping__bowtie", "step_2AS_denovo__spades"],
+        "expect_in_context": ["module_filtered_denovo", "step_2AS_mapping__bowtie", "step_2AS_denovo__spades"],
     },
     {
         "id": "L5_09_scaffolds_filtering",
@@ -198,6 +206,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_scaffolds_filtering",
         "selected_module_ids": [],
+        "expect_in_context": ["module_scaffolds_filtering"],
     },
     {
         "id": "L5_10_plasmids",
@@ -213,6 +222,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_plasmids",
         "selected_module_ids": [],
+        "expect_in_context": ["module_plasmids"],
     },
     {
         "id": "L5_11_variant_lineage_fixed",
@@ -229,6 +239,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_variant_lineage_FIXED",
         "selected_module_ids": [],
+        "expect_in_context": ["module_variant_lineage_FIXED"],
     },
     {
         "id": "L5_12_segmented",
@@ -245,6 +256,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_segmented",
         "selected_module_ids": [],
+        "expect_in_context": ["module_segmented"],
     },
     {
         "id": "L5_13_enterotoxin",
@@ -261,6 +273,7 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_enterotoxin_saureus_finder",
         "selected_module_ids": [],
+        "expect_in_context": ["module_enterotoxin_saureus_finder"],
     },
     {
         "id": "L5_14_vdraft_light",
@@ -277,5 +290,6 @@ LEVEL5_SCENARIOS = [
         "strategy_selector": "EXACT_MATCH",
         "used_template_id": "module_vdraft_light",
         "selected_module_ids": [],
+        "expect_in_context": ["module_vdraft_light"],
     },
 ]
