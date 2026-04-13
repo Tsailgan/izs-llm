@@ -46,11 +46,11 @@ def consultant_node(state: GraphState, store: BaseStore):
     metadata_context = retrieve_rag_context(latest_query, store, embed_code=False)
     print(f"[Consultant] RAG Context Retrieved: {len(metadata_context)} chars")
     
-    print("\n" + "═" * 60)
-    print("                 RAG METADATA CONTEXT")
-    print("═" * 60)
-    print(metadata_context)
-    print("═" * 60 + "\n")
+    # print("\n" + "═" * 60)
+    # print("                 RAG METADATA CONTEXT")
+    # print("═" * 60)
+    # print(metadata_context)
+    # print("═" * 60 + "\n")
 
     current_plan = state.get("design_plan", "No plan generated yet.")
     current_modules = state.get("selected_module_ids", [])

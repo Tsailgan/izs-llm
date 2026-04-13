@@ -233,6 +233,7 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
         session_id = f"recreate_rev_{scenario['id']}_{uuid.uuid4().hex[:8]}"
         scores = {}
         details = {}
+        failures = []
 
         def _missing_ids(expected, context_text):
             return [eid for eid in expected if eid not in (context_text or "")]
@@ -251,11 +252,7 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
         )
         missing_initial = _missing_ids(initial_expected, initial_context)
         if missing_initial:
-            return {
-                "success": False,
-                "scores": {"flow_score": 1.0},
-                "details": {"reason": f"Initial-turn RAG missing expected IDs: {missing_initial}"},
-            }
+            failures.append(f"Initial-turn RAG missing expected IDs: {missing_initial}")
 
         scores["initial_rag_recall_pct"] = (
             (len(initial_expected) - len(missing_initial)) / len(initial_expected) * 100
@@ -293,11 +290,7 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
         )
         missing_revision = _missing_ids(revision_expected, revision_context)
         if missing_revision:
-            return {
-                "success": False,
-                "scores": {"flow_score": 1.0},
-                "details": {"reason": f"Revision-turn RAG missing expected IDs: {missing_revision}"},
-            }
+            failures.append(f"Revision-turn RAG missing expected IDs: {missing_revision}")
 
         scores["revision_rag_recall_pct"] = (
             (len(revision_expected) - len(missing_revision)) / len(revision_expected) * 100
@@ -321,40 +314,20 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                             scores[f"final_consultant_{k}"] = v
                     # Mandatory thresholds for revision consultant quality.
                     if consultant_judge.get("faithfulness_score", 0) < 4:
-                        return {
-                            "success": False,
-                            "scores": scores,
-                            "details": {
-                                "reason": (
-                                    "Final consultant faithfulness score below threshold: "
-                                    f"{consultant_judge.get('faithfulness_score')}"
-                                )
-                            },
-                        }
+                        failures.append(
+                            "Final consultant faithfulness score below threshold: "
+                            f"{consultant_judge.get('faithfulness_score')}"
+                        )
                     if consultant_judge.get("relevance_score", 0) < 4:
-                        return {
-                            "success": False,
-                            "scores": scores,
-                            "details": {
-                                "reason": (
-                                    "Final consultant relevance score below threshold: "
-                                    f"{consultant_judge.get('relevance_score')}"
-                                )
-                            },
-                        }
+                        failures.append(
+                            "Final consultant relevance score below threshold: "
+                            f"{consultant_judge.get('relevance_score')}"
+                        )
                     details["final_consultant_judge"] = consultant_judge
                 else:
-                    return {
-                        "success": False,
-                        "scores": scores,
-                        "details": {"reason": "Final consultant judge returned empty result"},
-                    }
+                    failures.append("Final consultant judge returned empty result")
             except Exception as e:
-                return {
-                    "success": False,
-                    "scores": scores,
-                    "details": {"reason": f"Final consultant judge failed: {str(e)[:200]}"},
-                }
+                failures.append(f"Final consultant judge failed: {str(e)[:200]}")
 
         final_code = None
         t4 = None
@@ -362,11 +335,7 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
         if expect_rejection_on_revision:
             # For revision rejection scenarios, do NOT force execution.
             if not (t3.get("status") == "CHATTING" and not t3.get("nextflow_code")):
-                return {
-                    "success": False,
-                    "scores": {"flow_score": 1.0},
-                    "details": {"reason": "Expected revision rejection (CHATTING/no code)"},
-                }
+                failures.append("Expected revision rejection (CHATTING/no code)")
 
             # Optional rejection-quality judge only on final consultant reply.
             if judge_llm:
@@ -387,87 +356,53 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                             if "score" in k:
                                 scores[f"final_rejection_{k}"] = v
                         if rej_judge.get("rejection_score", 0) < 4:
-                            return {
-                                "success": False,
-                                "scores": scores,
-                                "details": {
-                                    "reason": (
-                                        "Revision rejection score below threshold: "
-                                        f"{rej_judge.get('rejection_score')}"
-                                    )
-                                },
-                            }
+                            failures.append(
+                                "Revision rejection score below threshold: "
+                                f"{rej_judge.get('rejection_score')}"
+                            )
                         if rej_judge.get("alternative_score", 0) < 4:
-                            return {
-                                "success": False,
-                                "scores": scores,
-                                "details": {
-                                    "reason": (
-                                        "Revision rejection alternative score below threshold: "
-                                        f"{rej_judge.get('alternative_score')}"
-                                    )
-                                },
-                            }
+                            failures.append(
+                                "Revision rejection alternative score below threshold: "
+                                f"{rej_judge.get('alternative_score')}"
+                            )
                         details["final_rejection_judge"] = rej_judge
                     else:
-                        return {
-                            "success": False,
-                            "scores": scores,
-                            "details": {"reason": "Final rejection judge returned empty result"},
-                        }
+                        failures.append("Final rejection judge returned empty result")
                 except Exception as e:
-                    return {
-                        "success": False,
-                        "scores": scores,
-                        "details": {"reason": f"Final rejection judge failed: {str(e)[:200]}"},
-                    }
+                    failures.append(f"Final rejection judge failed: {str(e)[:200]}")
 
             scores.setdefault("flow_score", 5.0)
         else:
             # Non-rejection revisions must return to consultant stage before final approval.
             if t3.get("status") != "CHATTING" or t3.get("nextflow_code"):
-                return {
-                    "success": False,
-                    "scores": {"flow_score": 1.0},
-                    "details": {
-                        "reason": (
-                            "Revision step must remain CHATTING with no code; "
-                            "final execution must happen only after explicit second approval"
-                        )
-                    },
-                }
+                failures.append(
+                    "Revision step must remain CHATTING with no code; "
+                    "final execution must happen only after explicit second approval"
+                )
 
             # Turn 4: force approval for revised execution if needed.
             forced_t4 = _force_approved_execution(api_client, session_id)
             if not forced_t4:
-                return {
-                    "success": False,
-                    "scores": {"flow_score": 1.0},
-                    "details": {"reason": "Could not reach final APPROVED revised execution after forced approvals"},
-                }
-            t4 = forced_t4
+                failures.append("Could not reach final APPROVED revised execution after forced approvals")
+                t4 = None
+                final_code = None
+            else:
+                t4 = forced_t4
+                final_code = t4["nextflow_code"]
 
-            final_code = t4["nextflow_code"]
-
-            if scenario.get("expect_code_change", False) and initial_code == final_code:
-                return {
-                    "success": False,
-                    "scores": {"flow_score": 1.0},
-                    "details": {"reason": "Expected code change, but initial and final code are identical"},
-                }
+            if final_code and scenario.get("expect_code_change", False) and initial_code == final_code:
+                failures.append("Expected code change, but initial and final code are identical")
 
             must_include = scenario.get("must_include_final", [])
-            final_lc = final_code.lower()
-            missing = [token for token in must_include if token.lower() not in final_lc]
-            if missing:
-                return {
-                    "success": False,
-                    "scores": {"flow_score": 1.0},
-                    "details": {"reason": f"Final revised code missing expected tokens: {missing}"},
-                }
+            missing = []
+            if final_code:
+                final_lc = final_code.lower()
+                missing = [token for token in must_include if token.lower() not in final_lc]
+                if missing:
+                    failures.append(f"Final revised code missing expected tokens: {missing}")
 
             # Judge only the final architect output against revision RAG context.
-            if judge_llm:
+            if judge_llm and final_code:
                 try:
                     architect_judge = run_pipeline_judge(
                         judge_llm=judge_llm,
@@ -480,58 +415,35 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                             if "score" in k:
                                 scores[f"final_architect_{k}"] = v
                         if architect_judge.get("syntax_score", 0) < 4:
-                            return {
-                                "success": False,
-                                "scores": scores,
-                                "details": {
-                                    "reason": (
-                                        "Final architect syntax score below threshold: "
-                                        f"{architect_judge.get('syntax_score')}"
-                                    )
-                                },
-                            }
+                            failures.append(
+                                "Final architect syntax score below threshold: "
+                                f"{architect_judge.get('syntax_score')}"
+                            )
                         if architect_judge.get("logic_score", 0) < 4:
-                            return {
-                                "success": False,
-                                "scores": scores,
-                                "details": {
-                                    "reason": (
-                                        "Final architect logic score below threshold: "
-                                        f"{architect_judge.get('logic_score')}"
-                                    )
-                                },
-                            }
+                            failures.append(
+                                "Final architect logic score below threshold: "
+                                f"{architect_judge.get('logic_score')}"
+                            )
                         details["final_architect_judge"] = architect_judge
                     else:
-                        return {
-                            "success": False,
-                            "scores": scores,
-                            "details": {"reason": "Final architect judge returned empty result"},
-                        }
+                        failures.append("Final architect judge returned empty result")
                 except Exception as e:
-                    return {
-                        "success": False,
-                        "scores": scores,
-                        "details": {"reason": f"Final architect judge failed: {str(e)[:200]}"},
-                    }
+                    failures.append(f"Final architect judge failed: {str(e)[:200]}")
+            elif judge_llm and not final_code:
+                failures.append("Final architect judge skipped because final code was not generated")
 
             # Compiler-level validation for final revised code.
-            try:
-                val_res = validate_nextflow(final_code, run_stub=(scenario.get("level", 1) >= 3))
-                details["final_nextflow_validation"] = val_res
-                if val_res.get("nf_syntax_passed") is False:
-                    return {
-                        "success": False,
-                        "scores": scores,
-                        "details": {
-                            "reason": (
-                                "Final revised code failed Nextflow syntax validation: "
-                                f"{val_res.get('nf_syntax_error', 'Unknown error')[:200]}"
-                            )
-                        },
-                    }
-            except Exception as e:
-                details["final_nextflow_validation_error"] = str(e)[:200]
+            if final_code:
+                try:
+                    val_res = validate_nextflow(final_code, run_stub=(scenario.get("level", 1) >= 3))
+                    details["final_nextflow_validation"] = val_res
+                    if val_res.get("nf_syntax_passed") is False:
+                        failures.append(
+                            "Final revised code failed Nextflow syntax validation: "
+                            f"{val_res.get('nf_syntax_error', 'Unknown error')[:200]}"
+                        )
+                except Exception as e:
+                    details["final_nextflow_validation_error"] = str(e)[:200]
 
             scores.setdefault("flow_score", 5.0)
 
@@ -561,8 +473,28 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                 "revision_missing_ids": missing_revision,
                 "initial_rag_context": initial_context,
                 "revision_rag_context": revision_context,
+                "failures": failures,
             }
         )
+
+        # Mandatory judge evidence per path.
+        if expect_rejection_on_revision:
+            if not any(k.startswith("final_rejection_") for k in scores.keys()):
+                failures.append("Mandatory final rejection judge scores missing")
+        else:
+            if not any(k.startswith("final_consultant_") for k in scores.keys()):
+                failures.append("Mandatory final consultant judge scores missing")
+            if not any(k.startswith("final_architect_") for k in scores.keys()):
+                failures.append("Mandatory final architect judge scores missing")
+
+        if failures:
+            scores["flow_score"] = 1.0
+            details["reason"] = failures[0]
+            return {
+                "success": False,
+                "scores": scores,
+                "details": details,
+            }
 
         return {
             "success": True,
