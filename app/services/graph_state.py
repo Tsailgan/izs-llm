@@ -4,6 +4,7 @@ from langgraph.graph.message import add_messages
 
 class GraphState(TypedDict):
     user_query: str
+    generate_diagrams: Optional[bool]
     
     # --- Planner / Consultant State ---
     consultant_status: Optional[str]

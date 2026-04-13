@@ -12,6 +12,7 @@ from app.services.graph import app_graph, global_store
 class ChatRequest(BaseModel):
     session_id: str = Field(..., description="Unique ID for the user session to remember chat history")
     message: str = Field(..., description="The user's prompt or reply")
+    generate_diagrams: bool = Field(True, description="Whether to run diagram generation nodes for this turn")
 
 class ChatResponse(BaseModel):
     status: str
@@ -66,6 +67,7 @@ async def chat_with_agent(request: ChatRequest):
         result = await app_graph.ainvoke(
             {
                 "user_query": request.message,
+                "generate_diagrams": request.generate_diagrams,
                 "messages": [("user", request.message)]
             }, 
             config=config

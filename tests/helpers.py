@@ -50,7 +50,13 @@ def rate_limit_pause(seconds=15, reason="rate limit protection"):
 # API Client
 # ──────────────────────────────────────────────────────────────
 
-def send_chat(client, session_id: str, message: str, timeout: int = 120) -> dict:
+def send_chat(
+    client,
+    session_id: str,
+    message: str,
+    timeout: int = 120,
+    generate_diagrams: bool = True,
+) -> dict:
     """
     Send a single message to the /chat API endpoint.
 
@@ -59,7 +65,11 @@ def send_chat(client, session_id: str, message: str, timeout: int = 120) -> dict
         mermaid_deterministic, ast_json, elapsed, error
     """
     url = "/chat"
-    payload = {"session_id": session_id, "message": message}
+    payload = {
+        "session_id": session_id,
+        "message": message,
+        "generate_diagrams": generate_diagrams,
+    }
 
     start = time.time()
     try:
@@ -169,14 +179,19 @@ def run_multi_turn_chat(
     return result
 
 
-def run_with_retries(test_fn, max_retries=2, pause_between=DEFAULT_PAUSE_ON_ERROR):
+def run_with_retries(
+    test_fn,
+    max_retries=2,
+    pause_between=DEFAULT_PAUSE_ON_ERROR,
+    stop_avg_score=5.0,
+):
     """
     Run a test function up to max_retries times, keeping the BEST result.
     
     The test_fn should return a dict with at least a 'scores' dict.
     The "best" result is the one with the highest average score.
 
-    Retries even on "success" unless a perfect score (5.0) is achieved.
+    Retries even on "success" unless stop_avg_score is achieved.
 
     Returns
     -------
@@ -199,10 +214,13 @@ def run_with_retries(test_fn, max_retries=2, pause_between=DEFAULT_PAUSE_ON_ERRO
             result["error"] = None
             all_results.append(result)
             
-            # EARLY EXIT: If we get a perfect score and no errors, stop retrying.
+            # EARLY EXIT: If we hit the configured score threshold, stop retrying.
             avg_score = _avg_scores(result.get("scores", {}))
-            if avg_score >= 5.0:
-                print(f"🌟 Perfect score (5.0) achieved on attempt {attempt}. Skipping further trials.")
+            if avg_score >= stop_avg_score:
+                print(
+                    f"🌟 Early stop threshold ({stop_avg_score}) achieved on "
+                    f"attempt {attempt} with avg score {avg_score}. Skipping further trials."
+                )
                 break
                 
         except Exception as e:

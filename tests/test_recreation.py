@@ -17,6 +17,7 @@ from tests.helpers import (
     send_chat,
     run_academic_judge,
     run_pipeline_judge,
+    run_diagram_judge,
     run_rejection_judge,
     run_with_retries,
 )
@@ -41,11 +42,21 @@ ALL_RECREATION_REV_SCENARIOS = [
 ]
 
 
-def _force_approved_execution(api_client, session_id: str, max_attempts: int = 4):
+def _force_approved_execution(
+    api_client,
+    session_id: str,
+    max_attempts: int = 4,
+    generate_diagrams: bool = True,
+):
     """Keep sending approval until execution returns APPROVED + code, or return None."""
     last = None
     for _ in range(max_attempts):
-        last = send_chat(api_client, session_id, "Approved.")
+        last = send_chat(
+            api_client,
+            session_id,
+            "Approved.",
+            generate_diagrams=generate_diagrams,
+        )
         if (
             last.get("success")
             and last.get("status") == "APPROVED"
@@ -264,8 +275,13 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
         if not t2.get("success"):
             raise AssertionError(f"Turn 2 failed: {t2.get('error')}")
 
-        if not (t2.get("status") == "APPROVED" and t2.get("nextflow_code")):
-            forced_t2 = _force_approved_execution(api_client, session_id)
+        # Initial run only needs approval; no mandatory diagram checks here.
+        if t2.get("status") != "APPROVED":
+            forced_t2 = _force_approved_execution(
+                api_client,
+                session_id,
+                generate_diagrams=False,
+            )
             if not forced_t2:
                 return {
                     "success": False,
@@ -274,9 +290,7 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                 }
             t2 = forced_t2
 
-        initial_code = t2["nextflow_code"]
-
-        # Turn 3: revision request returns to consultant; can be normal revision or rejection.
+        initial_code = t2.get("nextflow_code")
         t3 = send_chat(api_client, session_id, prompts[2])
         if not t3.get("success"):
             raise AssertionError(f"Turn 3 failed: {t3.get('error')}")
@@ -330,6 +344,8 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                 failures.append(f"Final consultant judge failed: {str(e)[:200]}")
 
         final_code = None
+        final_mermaid_agent = None
+        final_mermaid_det = None
         t4 = None
 
         if expect_rejection_on_revision:
@@ -381,7 +397,11 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                 )
 
             # Turn 4: force approval for revised execution if needed.
-            forced_t4 = _force_approved_execution(api_client, session_id)
+            forced_t4 = _force_approved_execution(
+                api_client,
+                session_id,
+                generate_diagrams=True,
+            )
             if not forced_t4:
                 failures.append("Could not reach final APPROVED revised execution after forced approvals")
                 t4 = None
@@ -389,6 +409,15 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
             else:
                 t4 = forced_t4
                 final_code = t4["nextflow_code"]
+                final_mermaid_agent = t4.get("mermaid_agent")
+                final_mermaid_det = t4.get("mermaid_deterministic")
+
+            if not final_code:
+                failures.append("Final revised execution did not return nextflow_code")
+            if not final_mermaid_agent:
+                failures.append("Final revised execution missing agentic mermaid diagram")
+            if not final_mermaid_det:
+                failures.append("Final revised execution missing deterministic mermaid diagram")
 
             if final_code and scenario.get("expect_code_change", False) and initial_code == final_code:
                 failures.append("Expected code change, but initial and final code are identical")
@@ -432,6 +461,70 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
             elif judge_llm and not final_code:
                 failures.append("Final architect judge skipped because final code was not generated")
 
+            # Mandatory diagram judges for BOTH final diagram variants.
+            if judge_llm and final_code and final_mermaid_det:
+                try:
+                    det_judge = run_diagram_judge(
+                        judge_llm=judge_llm,
+                        tech_context=revision_context,
+                        nf_code=final_code,
+                        mermaid_code=final_mermaid_det,
+                        strategy="deterministic",
+                    )
+                    if det_judge:
+                        for k, v in det_judge.items():
+                            if "score" in k:
+                                scores[f"final_det_{k}"] = v
+                        if det_judge.get("syntax_score", 0) < 4:
+                            failures.append(
+                                "Final deterministic diagram syntax score below threshold: "
+                                f"{det_judge.get('syntax_score')}"
+                            )
+                        if det_judge.get("mapping_score", 0) < 4:
+                            failures.append(
+                                "Final deterministic diagram mapping score below threshold: "
+                                f"{det_judge.get('mapping_score')}"
+                            )
+                        details["final_det_diagram_judge"] = det_judge
+                    else:
+                        failures.append("Final deterministic diagram judge returned empty result")
+                except Exception as e:
+                    failures.append(f"Final deterministic diagram judge failed: {str(e)[:200]}")
+
+            if judge_llm and final_code and final_mermaid_agent:
+                try:
+                    agent_judge = run_diagram_judge(
+                        judge_llm=judge_llm,
+                        tech_context=revision_context,
+                        nf_code=final_code,
+                        mermaid_code=final_mermaid_agent,
+                        strategy="agentic",
+                    )
+                    if agent_judge:
+                        for k, v in agent_judge.items():
+                            if "score" in k:
+                                scores[f"final_agent_{k}"] = v
+                        if agent_judge.get("syntax_score", 0) < 4:
+                            failures.append(
+                                "Final agentic diagram syntax score below threshold: "
+                                f"{agent_judge.get('syntax_score')}"
+                            )
+                        if agent_judge.get("mapping_score", 0) < 4:
+                            failures.append(
+                                "Final agentic diagram mapping score below threshold: "
+                                f"{agent_judge.get('mapping_score')}"
+                            )
+                        details["final_agent_diagram_judge"] = agent_judge
+                    else:
+                        failures.append("Final agentic diagram judge returned empty result")
+                except Exception as e:
+                    failures.append(f"Final agentic diagram judge failed: {str(e)[:200]}")
+
+            if judge_llm and not final_mermaid_det:
+                failures.append("Final deterministic diagram judge skipped because deterministic diagram missing")
+            if judge_llm and not final_mermaid_agent:
+                failures.append("Final agentic diagram judge skipped because agentic diagram missing")
+
             # Compiler-level validation for final revised code.
             if final_code:
                 try:
@@ -457,10 +550,12 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                 "turn2_reply": t2.get("reply"),
                 "turn3_reply": t3.get("reply"),
                 "turn4_reply": t4.get("reply") if t4 else None,
-                "initial_code_length": len(initial_code),
+                "initial_code_length": len(initial_code) if initial_code else 0,
                 "final_code_length": len(final_code) if final_code else 0,
                 "initial_code": initial_code,
                 "final_code": final_code,
+                "final_mermaid_agent": t4.get("mermaid_agent") if t4 else None,
+                "final_mermaid_deterministic": t4.get("mermaid_deterministic") if t4 else None,
                 "expect_code_change": scenario.get("expect_code_change", False),
                 "must_include_final": scenario.get("must_include_final", []),
                 "revision_consultant_reply": t3.get("reply"),
@@ -486,6 +581,10 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                 failures.append("Mandatory final consultant judge scores missing")
             if not any(k.startswith("final_architect_") for k in scores.keys()):
                 failures.append("Mandatory final architect judge scores missing")
+            if not any(k.startswith("final_det_") for k in scores.keys()):
+                failures.append("Mandatory final deterministic diagram judge scores missing")
+            if not any(k.startswith("final_agent_") for k in scores.keys()):
+                failures.append("Mandatory final agentic diagram judge scores missing")
 
         if failures:
             scores["flow_score"] = 1.0
@@ -502,8 +601,8 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
             "details": details,
         }
 
-    # Best-of-2 retries; early stop if average score reaches 5.0.
-    best_result = run_with_retries(_attempt_once, max_retries=2)
+    # Best-of-2 retries; skip attempt 2 when average score is already >= 4.0.
+    best_result = run_with_retries(_attempt_once, max_retries=2, stop_avg_score=4.0)
 
     success = bool(best_result.get("success", False)) and not best_result.get("error")
     details = best_result.get("details", {})

@@ -14,6 +14,12 @@ def check_consultant_status(state: GraphState):
     return "chatting"
 
 
+def check_diagram_generation(state: GraphState):
+    if state.get("generate_diagrams", True):
+        return "with_diagrams"
+    return "no_diagrams"
+
+
 def delete_messages_node(state: GraphState):
     messages = state.get("messages", [])
     
@@ -81,9 +87,17 @@ def build_execution_subgraph():
     )
     
     sub.add_edge("repair", "architect")
-    sub.add_edge("renderer", "deterministic_diagram")
-    sub.add_edge("renderer", "diagram")
-    sub.add_edge("deterministic_diagram", END)
+    sub.add_conditional_edges(
+        "renderer",
+        check_diagram_generation,
+        {
+            "with_diagrams": "deterministic_diagram",
+            "no_diagrams": END,
+        }
+    )
+
+    # Agentic diagram runs after deterministic diagram to keep ordering predictable.
+    sub.add_edge("deterministic_diagram", "diagram")
     sub.add_edge("diagram", END)
     
     return sub.compile()
