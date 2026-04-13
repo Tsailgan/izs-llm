@@ -271,7 +271,12 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
         )
 
         # Turn 2: first approval should trigger first architect/execution output
-        t2 = send_chat(api_client, session_id, prompts[1])
+        t2 = send_chat(
+            api_client,
+            session_id,
+            prompts[1],
+            generate_diagrams=False,
+        )
         if not t2.get("success"):
             raise AssertionError(f"Turn 2 failed: {t2.get('error')}")
 
