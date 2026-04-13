@@ -88,7 +88,8 @@ JUDGE_PROMPT = ChatPromptTemplate.from_messages([
     ("human",
      "CATALOG CONTEXT (tools available to the AI):\n{context}\n\n"
      "CONVERSATION HISTORY:\n{chat}\n\n"
-     "FINAL AI REPLY TO EVALUATE:\n{reply}")
+     "FINAL AI REPLY TO EVALUATE:\n{reply}\n\n"
+     "AI GENERATED DESIGN PLAN:\n{design_plan}")
 ])
 
 

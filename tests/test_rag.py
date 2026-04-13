@@ -42,16 +42,25 @@ def test_rag_retrieval(scenario, store):
     # Extract IDs that were actually found in the context blocks
     actual_found_ids = re.findall(r'--- (?:COMPONENT|TEMPLATE): ([\w\_\d]+) ---', context)
     
+    found_count = len(expected_ids) - len(missing)
+    total_count = len(expected_ids)
+    recall_pct = (found_count / total_count * 100) if total_count > 0 else 0
+    
     passed = len(missing) == 0
-    scores = {"rag_precision": 1.0 if passed else 0.0}
+    scores = {
+        "rag_precision": 1.0 if passed else 0.0,
+        "rag_recall_pct": recall_pct
+    }
 
     if missing:
         print(f"\n[FAIL] {scenario['id']} test_rag failed!")
         print(f"  Expected: {expected_ids}")
         print(f"  Got:      {actual_found_ids}")
         print(f"  Missing:  {missing}")
+        print(f"  Score:    {found_count}/{total_count} ({recall_pct:.0f}%)")
     else:
         print(f"\n[OK] {scenario['id']} test_rag succeeded! Found expected IDs: {expected_ids}")
+        print(f"  Score:    {found_count}/{total_count} (100%)")
 
     report.add_result(
         scenario_id=f"[RAG] {scenario['id']}",
@@ -65,9 +74,11 @@ def test_rag_retrieval(scenario, store):
             "expected": expected_ids,
             "actual": actual_found_ids,
             "missing": missing,
+            "found_count": found_count,
+            "total_count": total_count,
             "context_length": len(context),
             "rag_context": context,
-            "error": f"RAG Missing: {missing} (Expected {expected_ids}, Got {actual_found_ids})" if missing else None,
+            "error": f"RAG Missing: {missing} (Found {found_count}/{total_count})" if missing else None,
         }
     )
 

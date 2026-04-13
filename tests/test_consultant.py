@@ -91,6 +91,7 @@ def test_consultant_logic(scenario, store, llm, judge_llm):
                 real_context=real_context,
                 chat_history=chat_history,
                 ai_reply=result.response_to_user,
+                design_plan=result.draft_plan,
             )
             if judge_result:
                 scores = {k: v for k, v in judge_result.items() if "score" in k}

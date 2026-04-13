@@ -294,7 +294,7 @@ def force_approve_consultant(agent, real_context, chat_history, max_attempts=3):
     pytest.fail(f"Agent stubbornly refused to approve after {max_attempts} attempts. Final status: {result.status} | AI said: {result.response_to_user}")
 
 
-def run_academic_judge(judge_llm, real_context, chat_history, ai_reply):
+def run_academic_judge(judge_llm, real_context, chat_history, ai_reply, design_plan=None):
     """Runs the LLM judge for the Consultant (faithfulness + relevance).
 
     Invokes the production-grade JUDGE_PROMPT with AcademicEval
@@ -305,7 +305,8 @@ def run_academic_judge(judge_llm, real_context, chat_history, ai_reply):
     evaluation = (JUDGE_PROMPT | judge).invoke({
         "context": real_context,
         "chat": formatted_chat,
-        "reply": ai_reply
+        "reply": ai_reply,
+        "design_plan": design_plan or "No design plan generated."
     })
     
     if not evaluation:

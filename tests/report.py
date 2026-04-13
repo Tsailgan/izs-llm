@@ -144,6 +144,15 @@ class ReportCollector:
         pct = (total_pass / len(self.results) * 100) if self.results else 0
         lines.append(f"| **Passed** | {total_pass} ✅ ({pct:.0f}%) |")
         lines.append(f"| **Failed** | {total_fail} ❌ |")
+        
+        # Calculate aggregate RAG performance
+        rag_results = [r for r in self.results if "rag_recall_pct" in r["scores"]]
+        if rag_results:
+            total_found = sum(r["details"].get("found_count", 0) for r in rag_results)
+            total_req = sum(r["details"].get("total_count", 0) for r in rag_results)
+            rag_pct = (total_found / total_req * 100) if total_req > 0 else 0
+            lines.append(f"| **RAG Retrieval** | {total_found}/{total_req} documents ({rag_pct:.0f}%) |")
+        
         lines.append(f"| **RAG Database** | ✅ LOADED (via `conftest.py`) |")
         lines.append(f"| **Retry Attempts** | Each test retried up to 3 times (best result kept) |")
         lines.append("")
@@ -263,6 +272,8 @@ class ReportCollector:
                     lines.append(f"| Reference Code | {det['reference_code_length']} chars |")
                 if det.get("include_match_ratio"):
                     lines.append(f"| Include Match | {det['include_match_ratio']} |")
+                if "found_count" in det and "total_count" in det:
+                    lines.append(f"| Retrieval Score | **{det['found_count']}/{det['total_count']}** documents found |")
 
                 lines.append("")
 

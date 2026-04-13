@@ -54,12 +54,14 @@ Every test that generates code is evaluated through **three independent layers**
 ### Layer 3: LLM Judge (when `JUDGE_BASE_URL` is set)
 - Uses `Qwen3-Coder-30B` on a custom endpoint with structured Pydantic output
 - Expert-calibrated 5-level rubrics for each test type:
-  - **L1/L2**: Faithfulness to catalog + Relevance to biological scenario
-  - **L3**: Nextflow DSL2 syntax + Pipeline logic + Diagram accuracy (both agentic and deterministic)
-  - **L4**: Rejection correctness + Alternative suggestions quality
-  - **L5**: Structural similarity + Channel logic vs reference code
-- Chain-of-thought reasoning is forced before scoring (via `_reason` fields)
-- Judge reasoning is included in the final markdown report
+  - **Consultant**: Faithfulness to catalog + Relevance to biological scenario.
+    - *Note*: The judge explicitly evaluates the internal **Design Plan** (where specific component IDs are listed) to ensure accuracy even if the user response is conversational.
+  - **RAG**: Retrieval precision and Document Recall (X/Y documents found).
+  - **Execution**: Nextflow DSL2 syntax + Pipeline logic + Diagram accuracy (both agentic and deterministic).
+  - **Rejection**: Rejection correctness + Alternative suggestions quality.
+  - **Recreation**: Structural similarity + Channel logic vs reference code.
+- Chain-of-thought reasoning is forced before scoring (via `_reason` fields).
+- Judge reasoning is included in the final markdown report.
 
 ## How Tests Work
 
@@ -90,11 +92,11 @@ tests/
 │   ├── level3_complex.py          # 6 complex multi-step scenarios
 │   ├── level4_guardrails.py       # 6 negative/rejection scenarios
 │   └── level5_recreation.py       # 14 module recreation scenarios + JSONL loader
-├── test_level1_rag.py             # Runner: Simple (judge only)
-├── test_level2_consultant.py      # Runner: Medium (judge only)
-├── test_level3_execution.py       # Runner: Complex (NF compiler + judge + diagrams)
-├── test_level4_rejection.py       # Runner: Negative (no code expected)
-└── test_level5_recreation.py      # Runner: Recreation (NF compiler + judge + ref comparison)
+├── test_rag.py                    # Runner: Isolated RAG Retrieval (Precision/Recall)
+├── test_consultant.py             # Runner: Logic (isolated agent + judge)
+├── test_execution.py              # Runner: E2E (NF compiler + judge + diagrams)
+├── test_rejection.py              # Runner: Guardrails (no code expected)
+└── test_recreation.py             # Runner: Modular Similarity (NF compiler + judge + ref comparison)
 ```
 
 ## Environment Variables
