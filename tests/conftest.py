@@ -33,11 +33,11 @@ def _preflight_checks():
             "  → Add it to .env or export it: export MISTRAL_API_KEY=your_key"
         )
 
-    # --- JUDGE_BASE_URL (optional — powers the judge) ---
+    # --- JUDGE_BASE_URL (required — powers the judge) ---
     if not os.environ.get("JUDGE_BASE_URL"):
-        print(
-            "\n⚠️  JUDGE_BASE_URL is not set — LLM judge scoring will be SKIPPED.\n"
-            "   Tests will still run with deterministic assertions only.\n"
+        errors.append(
+            "JUDGE_BASE_URL is not set.\n"
+            "  → LLM judge is required for evaluation. Set it in .env or export it."
         )
 
     # --- FAISS index (required — RAG retrieval) ---

@@ -15,6 +15,7 @@ Isolated Helpers (for direct agent/judge invocation, no API):
   - run_pipeline_judge(): invokes the Nextflow code LLM judge
   - run_diagram_judge(): invokes the Mermaid diagram LLM judge
 """
+import os
 import time
 import uuid
 
@@ -30,6 +31,16 @@ DEFAULT_PAUSE_ON_ERROR = 30        # seconds to wait after a rate limit / server
 
 def rate_limit_pause(seconds=15, reason="rate limit protection"):
     """Pause execution for rate limit protection."""
+    # Hardcoded default to False (disabled for judge), then check environment
+    disable_judge_rate = True 
+    if os.environ.get("JUDGE_RATE_LIMIT", "false").lower() == "true":
+        disable_judge_rate = False
+
+    is_judge = "judge" in reason.lower()
+
+    if is_judge and disable_judge_rate:
+        return
+
     print(f"\n⏳ Pausing {seconds}s ({reason})...")
     time.sleep(seconds)
     print("▶️ Resuming.")
@@ -158,18 +169,24 @@ def run_multi_turn_chat(
     return result
 
 
-def run_with_retries(test_fn, max_retries=3, pause_between=DEFAULT_PAUSE_ON_ERROR):
+def run_with_retries(test_fn, max_retries=2, pause_between=DEFAULT_PAUSE_ON_ERROR):
     """
     Run a test function up to max_retries times, keeping the BEST result.
     
     The test_fn should return a dict with at least a 'scores' dict.
     The "best" result is the one with the highest average score.
 
+    Retries even on "success" unless a perfect score (5.0) is achieved.
+
     Returns
     -------
-    (best_result, all_results)
+    best_result
     """
     all_results = []
+    # Hardcoded default to False, then check env
+    disable_judge_rate = True
+    if os.environ.get("JUDGE_RATE_LIMIT", "false").lower() == "true":
+        disable_judge_rate = False
 
     for attempt in range(1, max_retries + 1):
         print(f"\n{'='*60}")
@@ -181,28 +198,35 @@ def run_with_retries(test_fn, max_retries=3, pause_between=DEFAULT_PAUSE_ON_ERRO
             result["attempt"] = attempt
             result["error"] = None
             all_results.append(result)
+            
+            # EARLY EXIT: If we get a perfect score and no errors, stop retrying.
+            avg_score = _avg_scores(result.get("scores", {}))
+            if avg_score >= 5.0:
+                print(f"🌟 Perfect score (5.0) achieved on attempt {attempt}. Skipping further trials.")
+                break
+                
         except Exception as e:
             error_str = str(e).lower()
             all_results.append({"attempt": attempt, "error": str(e), "scores": {}})
 
             # If rate limit, pause longer
             if "429" in error_str or "rate limit" in error_str:
-                print(f"\n⚠️ Rate limit hit on attempt {attempt}. Pausing {pause_between}s...")
-                rate_limit_pause(pause_between, "rate limit recovery")
+                is_judge_error = "judge" in error_str
+                if not (is_judge_error and disable_judge_rate):
+                    print(f"\n⚠️ Rate limit hit on attempt {attempt}. Pausing {pause_between}s...")
+                    rate_limit_pause(pause_between, "rate limit recovery")
             elif attempt < max_retries:
                 rate_limit_pause(pause_between // 2, "error recovery")
 
-        # Pause between retries regardless
+        # Pause between retries to protect the main LLM (but not if it's judge-only)
         if attempt < max_retries:
-            rate_limit_pause(DEFAULT_PAUSE_BETWEEN_TESTS, "between retry attempts")
+            rate_limit_pause(DEFAULT_PAUSE_BETWEEN_TESTS, "between retry attempts (main llm)")
 
     # Pick the best result (highest average score)
     best = None
     best_avg = -1
     for r in all_results:
-        scores = r.get("scores", {})
-        score_vals = [v for k, v in scores.items() if isinstance(v, (int, float)) and "score" in k]
-        avg = sum(score_vals) / len(score_vals) if score_vals else 0
+        avg = _avg_scores(r.get("scores", {}))
         if avg > best_avg:
             best_avg = avg
             best = r
