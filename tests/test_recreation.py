@@ -13,10 +13,45 @@ import pytest
 from tests.helpers import (
     build_test_execution_graph,
     rate_limit_pause,
+    send_chat,
+    run_academic_judge,
+    run_pipeline_judge,
+    run_rejection_judge,
+    run_with_retries,
 )
 from tests.nf_validation import validate_nextflow
 from tests.scenarios.level5_recreation import LEVEL5_SCENARIOS, REFERENCE_CODE
+from tests.scenarios.level1_simple import LEVEL1_SCENARIOS
+from tests.scenarios.level2_medium import LEVEL2_SCENARIOS
+from tests.scenarios.level3_complex import LEVEL3_SCENARIOS
 from tests.report import report
+from app.services.tools import retrieve_rag_context
+
+
+class _Msg:
+    def __init__(self, msg_type: str, content: str):
+        self.type = msg_type
+        self.content = content
+
+ALL_RECREATION_REV_SCENARIOS = [
+    s
+    for s in (LEVEL1_SCENARIOS + LEVEL2_SCENARIOS + LEVEL3_SCENARIOS)
+    if "RECREATION_REV" in s["id"]
+]
+
+
+def _force_approved_execution(api_client, session_id: str, max_attempts: int = 4):
+    """Keep sending approval until execution returns APPROVED + code, or return None."""
+    last = None
+    for _ in range(max_attempts):
+        last = send_chat(api_client, session_id, "Approved.")
+        if (
+            last.get("success")
+            and last.get("status") == "APPROVED"
+            and last.get("nextflow_code")
+        ):
+            return last
+    return None
 
 @pytest.mark.parametrize(
     "scenario",
@@ -170,3 +205,235 @@ def test_code_recreation(scenario, store, judge_llm):
     rate_limit_pause()
     
     assert not errors, f"Recreation test failed:\n" + "\n".join(errors)
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    ALL_RECREATION_REV_SCENARIOS,
+    ids=[s["id"] for s in ALL_RECREATION_REV_SCENARIOS],
+)
+def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_llm):
+    """Verify two-stage flow: initial recreation build, then revised build after re-approval."""
+
+    prompts = scenario["chat_messages"]
+    if len(prompts) != 3:
+        pytest.skip("Two-stage recreation flow only applies to 3-turn revision scenarios")
+
+    def _attempt_once():
+        session_id = f"recreate_rev_{scenario['id']}_{uuid.uuid4().hex[:8]}"
+        scores = {}
+        details = {}
+
+        def _missing_ids(expected, context_text):
+            return [eid for eid in expected if eid not in (context_text or "")]
+
+        # Turn 1: consultant + RAG stage for initial request
+        t1 = send_chat(api_client, session_id, prompts[0])
+        if not t1.get("success"):
+            raise AssertionError(f"Turn 1 failed: {t1.get('error')}")
+
+        initial_context = retrieve_rag_context(prompts[0], store, embed_code=False)
+        initial_expected = (
+            scenario.get("expect_in_context_initial")
+            or scenario.get("template_ids", [])
+            or scenario.get("expect_in_context", [])
+        )
+        missing_initial = _missing_ids(initial_expected, initial_context)
+        if missing_initial:
+            return {
+                "success": False,
+                "scores": {"flow_score": 1.0},
+                "details": {"reason": f"Initial-turn RAG missing expected IDs: {missing_initial}"},
+            }
+
+        # Turn 2: first approval should trigger first architect/execution output
+        t2 = send_chat(api_client, session_id, prompts[1])
+        if not t2.get("success"):
+            raise AssertionError(f"Turn 2 failed: {t2.get('error')}")
+
+        if not (t2.get("status") == "APPROVED" and t2.get("nextflow_code")):
+            forced_t2 = _force_approved_execution(api_client, session_id)
+            if not forced_t2:
+                return {
+                    "success": False,
+                    "scores": {"flow_score": 1.0},
+                    "details": {"reason": "Could not reach first APPROVED execution after forced approvals"},
+                }
+            t2 = forced_t2
+
+        initial_code = t2["nextflow_code"]
+
+        # Turn 3: revision request returns to consultant; can be normal revision or rejection.
+        t3 = send_chat(api_client, session_id, prompts[2])
+        if not t3.get("success"):
+            raise AssertionError(f"Turn 3 failed: {t3.get('error')}")
+
+        expect_rejection_on_revision = scenario.get("expect_rejection_on_revision", False)
+        revision_context = retrieve_rag_context(prompts[2], store, embed_code=False)
+        revision_expected = (
+            scenario.get("expect_in_context_revision")
+            or scenario.get("expect_in_context", [])
+        )
+        missing_revision = _missing_ids(revision_expected, revision_context)
+        if missing_revision:
+            return {
+                "success": False,
+                "scores": {"flow_score": 1.0},
+                "details": {"reason": f"Revision-turn RAG missing expected IDs: {missing_revision}"},
+            }
+
+        # Judge only the last consultant turn (revision) with revision RAG context.
+        # In rejection-mode revisions, use the dedicated rejection judge only.
+        if judge_llm and not expect_rejection_on_revision:
+            try:
+                consultant_judge = run_academic_judge(
+                    judge_llm=judge_llm,
+                    real_context=revision_context,
+                    chat_history=[_Msg("human", prompts[2])],
+                    ai_reply=t3.get("reply") or "",
+                    design_plan=scenario.get("design_plan", ""),
+                )
+                if consultant_judge:
+                    for k, v in consultant_judge.items():
+                        if "score" in k:
+                            scores[f"final_consultant_{k}"] = v
+            except Exception as e:
+                details["final_consultant_judge_error"] = str(e)[:200]
+
+        final_code = None
+        t4 = None
+
+        if expect_rejection_on_revision:
+            # For revision rejection scenarios, do NOT force execution.
+            if not (t3.get("status") == "CHATTING" and not t3.get("nextflow_code")):
+                return {
+                    "success": False,
+                    "scores": {"flow_score": 1.0},
+                    "details": {"reason": "Expected revision rejection (CHATTING/no code)"},
+                }
+
+            # Optional rejection-quality judge only on final consultant reply.
+            if judge_llm:
+                try:
+                    rej_reason = scenario.get(
+                        "rejection_reason_revision",
+                        "Revision request should be rejected based on guardrail rules.",
+                    )
+                    rej_judge = run_rejection_judge(
+                        judge_llm=judge_llm,
+                        prompt=prompts[2],
+                        rejection_reason=rej_reason,
+                        reply=t3.get("reply") or "",
+                        status=t3.get("status") or "UNKNOWN",
+                    )
+                    if rej_judge:
+                        for k, v in rej_judge.items():
+                            if "score" in k:
+                                scores[f"final_rejection_{k}"] = v
+                except Exception as e:
+                    details["final_rejection_judge_error"] = str(e)[:200]
+
+            scores.setdefault("flow_score", 5.0)
+        else:
+            # Non-rejection revisions must return to consultant stage before final approval.
+            if t3.get("status") != "CHATTING" or t3.get("nextflow_code"):
+                return {
+                    "success": False,
+                    "scores": {"flow_score": 1.0},
+                    "details": {
+                        "reason": (
+                            "Revision step must remain CHATTING with no code; "
+                            "final execution must happen only after explicit second approval"
+                        )
+                    },
+                }
+
+            # Turn 4: force approval for revised execution if needed.
+            forced_t4 = _force_approved_execution(api_client, session_id)
+            if not forced_t4:
+                return {
+                    "success": False,
+                    "scores": {"flow_score": 1.0},
+                    "details": {"reason": "Could not reach final APPROVED revised execution after forced approvals"},
+                }
+            t4 = forced_t4
+
+            final_code = t4["nextflow_code"]
+
+            if scenario.get("expect_code_change", False) and initial_code == final_code:
+                return {
+                    "success": False,
+                    "scores": {"flow_score": 1.0},
+                    "details": {"reason": "Expected code change, but initial and final code are identical"},
+                }
+
+            must_include = scenario.get("must_include_final", [])
+            final_lc = final_code.lower()
+            missing = [token for token in must_include if token.lower() not in final_lc]
+            if missing:
+                return {
+                    "success": False,
+                    "scores": {"flow_score": 1.0},
+                    "details": {"reason": f"Final revised code missing expected tokens: {missing}"},
+                }
+
+            # Judge only the final architect output against revision RAG context.
+            if judge_llm:
+                try:
+                    architect_judge = run_pipeline_judge(
+                        judge_llm=judge_llm,
+                        design_plan=scenario.get("design_plan", ""),
+                        tech_context=revision_context,
+                        nf_code=final_code,
+                    )
+                    if architect_judge:
+                        for k, v in architect_judge.items():
+                            if "score" in k:
+                                scores[f"final_architect_{k}"] = v
+                except Exception as e:
+                    details["final_architect_judge_error"] = str(e)[:200]
+
+            scores.setdefault("flow_score", 5.0)
+
+        details.update(
+            {
+                "turn1_status": t1.get("status"),
+                "turn2_status": t2.get("status"),
+                "turn3_status": t3.get("status"),
+                "turn4_status": t4.get("status") if t4 else None,
+                "initial_code_length": len(initial_code),
+                "final_code_length": len(final_code) if final_code else 0,
+                "expect_code_change": scenario.get("expect_code_change", False),
+                "must_include_final": scenario.get("must_include_final", []),
+                "revision_consultant_reply": t3.get("reply"),
+                "expect_rejection_on_revision": expect_rejection_on_revision,
+                "initial_expected_ids": initial_expected,
+                "revision_expected_ids": revision_expected,
+            }
+        )
+
+        return {
+            "success": True,
+            "scores": scores,
+            "details": details,
+        }
+
+    # Best-of-2 retries; early stop if average score reaches 5.0.
+    best_result = run_with_retries(_attempt_once, max_retries=2)
+
+    success = bool(best_result.get("success", False)) and not best_result.get("error")
+    details = best_result.get("details", {})
+    details["retry_summary"] = best_result.get("all_attempts_summary", [])
+
+    report.add_result(
+        scenario_id=f"[Recreation-Flow] {scenario['id']}",
+        level=scenario["level"],
+        success=success,
+        difficulty=scenario.get("difficulty", "—"),
+        description=scenario.get("description", ""),
+        scores=best_result.get("scores", {}),
+        details=details,
+    )
+
+    rate_limit_pause(3, reason="between recreation revision flow tests")
+    assert success, f"Recreation flow failed: {details.get('reason', best_result.get('error', 'unknown'))}"

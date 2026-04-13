@@ -18,7 +18,11 @@ from tests.scenarios.level4_guardrails import LEVEL4_SCENARIOS
 from tests.scenarios.level5_recreation import LEVEL5_SCENARIOS
 from tests.report import report
 
-ALL_SCENARIOS = LEVEL1_SCENARIOS + LEVEL2_SCENARIOS + LEVEL3_SCENARIOS + LEVEL4_SCENARIOS + LEVEL5_SCENARIOS
+ALL_SCENARIOS = [
+    s
+    for s in (LEVEL1_SCENARIOS + LEVEL2_SCENARIOS + LEVEL3_SCENARIOS + LEVEL4_SCENARIOS + LEVEL5_SCENARIOS)
+    if "RECREATION_REV" not in s.get("id", "")
+]
 
 @pytest.mark.parametrize(
     "scenario",

@@ -22,7 +22,11 @@ from tests.scenarios.level2_medium import LEVEL2_SCENARIOS
 from tests.scenarios.level3_complex import LEVEL3_SCENARIOS
 from tests.report import report
 
-ALL_SCENARIOS = LEVEL1_SCENARIOS + LEVEL2_SCENARIOS + LEVEL3_SCENARIOS
+ALL_SCENARIOS = [
+    s
+    for s in (LEVEL1_SCENARIOS + LEVEL2_SCENARIOS + LEVEL3_SCENARIOS)
+    if "RECREATION_REV" not in s.get("id", "")
+]
 
 @pytest.mark.parametrize(
     "scenario",
