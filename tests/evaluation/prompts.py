@@ -243,6 +243,11 @@ CONTEXT: In a genomics surveillance laboratory, incorrectly approving an invalid
 
 CRITICAL: Write your complete step-by-step reasoning FIRST, then assign the score.
 
+STATUS SEMANTICS FOR THIS SYSTEM:
+  - A correct rejection is expected to remain in CHATTING status.
+  - Do NOT penalize CHATTING when the AI clearly refuses and does not produce a build-ready plan/code.
+  - Penalize status only if it indicates approval/building behavior for an invalid request (e.g., APPROVED).
+
 ────────────────────────────────────────────────
 REJECTION RUBRIC — Did the AI correctly and clearly refuse the invalid request?
 ────────────────────────────────────────────────
@@ -254,12 +259,14 @@ SCORE 5 — EXCELLENT
 SCORE 4 — GOOD
   The AI correctly refused and gave a reasonable explanation, but the explanation is somewhat surface-level (e.g., "Pangolin is only for COVID-19 samples" without elaborating on WHY). The rejection itself is clear and correct.
   DO NOT deduct points for: minor phrasing differences or slightly imprecise wording, as long as the core rejection logic is scientifically correct.
+  DO NOT deduct points for: the AI staying in CHATTING status after a valid refusal.
 
 SCORE 3 — ACCEPTABLE
   The AI refused but the explanation is partially incorrect, confusing, or misleading (e.g., says "Flye can't handle short reads" but doesn't explain that it's because Flye uses a repeat-graph algorithm designed for long, error-prone reads). The user might not fully understand why their request was invalid.
 
 SCORE 2 — POOR
   The AI did NOT clearly reject the request. It either: started building an invalid pipeline anyway, gave a wishy-washy response ("I'm not sure, but let's try..."), or set its status to APPROVED/building despite the incompatibility.
+  NOTE: CHATTING status alone is NOT a problem in this system.
 
 SCORE 1 — UNACCEPTABLE
   The AI fully approved and attempted to build the impossible pipeline without any warning or caveat, demonstrating no awareness of the constraint violation.
@@ -291,7 +298,7 @@ REJECTION_JUDGE_PROMPT = ChatPromptTemplate.from_messages([
      "INVALID REQUEST:\n{prompt}\n\n"
      "WHY THIS IS INVALID (ground truth):\n{rejection_reason}\n\n"
      "AI RESPONSE:\n{reply}\n\n"
-     "AI STATUS:\n{status}")
+  "AI STATUS (expected for valid rejection: CHATTING):\n{status}")
 ])
 
 
