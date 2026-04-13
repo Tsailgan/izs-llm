@@ -9,6 +9,7 @@ Iterates over recreation scenarios. Bypasses RAG and Consultant.
 """
 import uuid
 import pytest
+import re
 
 from tests.helpers import (
     build_test_execution_graph,
@@ -52,6 +53,12 @@ def _force_approved_execution(api_client, session_id: str, max_attempts: int = 4
         ):
             return last
     return None
+
+
+def _extract_context_ids(context: str):
+    if not context:
+        return []
+    return re.findall(r'--- (?:COMPONENT|TEMPLATE): ([\w\_\d]+) ---', context)
 
 @pytest.mark.parametrize(
     "scenario",
@@ -219,6 +226,9 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
     if len(prompts) != 3:
         pytest.skip("Two-stage recreation flow only applies to 3-turn revision scenarios")
 
+    if not judge_llm:
+        pytest.fail("judge_llm is required for recreation revision flow tests")
+
     def _attempt_once():
         session_id = f"recreate_rev_{scenario['id']}_{uuid.uuid4().hex[:8]}"
         scores = {}
@@ -233,6 +243,7 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
             raise AssertionError(f"Turn 1 failed: {t1.get('error')}")
 
         initial_context = retrieve_rag_context(prompts[0], store, embed_code=False)
+        initial_found = _extract_context_ids(initial_context)
         initial_expected = (
             scenario.get("expect_in_context_initial")
             or scenario.get("template_ids", [])
@@ -245,6 +256,11 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                 "scores": {"flow_score": 1.0},
                 "details": {"reason": f"Initial-turn RAG missing expected IDs: {missing_initial}"},
             }
+
+        scores["initial_rag_recall_pct"] = (
+            (len(initial_expected) - len(missing_initial)) / len(initial_expected) * 100
+            if initial_expected else 100.0
+        )
 
         # Turn 2: first approval should trigger first architect/execution output
         t2 = send_chat(api_client, session_id, prompts[1])
@@ -270,6 +286,7 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
 
         expect_rejection_on_revision = scenario.get("expect_rejection_on_revision", False)
         revision_context = retrieve_rag_context(prompts[2], store, embed_code=False)
+        revision_found = _extract_context_ids(revision_context)
         revision_expected = (
             scenario.get("expect_in_context_revision")
             or scenario.get("expect_in_context", [])
@@ -281,6 +298,11 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                 "scores": {"flow_score": 1.0},
                 "details": {"reason": f"Revision-turn RAG missing expected IDs: {missing_revision}"},
             }
+
+        scores["revision_rag_recall_pct"] = (
+            (len(revision_expected) - len(missing_revision)) / len(revision_expected) * 100
+            if revision_expected else 100.0
+        )
 
         # Judge only the last consultant turn (revision) with revision RAG context.
         # In rejection-mode revisions, use the dedicated rejection judge only.
@@ -297,8 +319,42 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                     for k, v in consultant_judge.items():
                         if "score" in k:
                             scores[f"final_consultant_{k}"] = v
+                    # Mandatory thresholds for revision consultant quality.
+                    if consultant_judge.get("faithfulness_score", 0) < 4:
+                        return {
+                            "success": False,
+                            "scores": scores,
+                            "details": {
+                                "reason": (
+                                    "Final consultant faithfulness score below threshold: "
+                                    f"{consultant_judge.get('faithfulness_score')}"
+                                )
+                            },
+                        }
+                    if consultant_judge.get("relevance_score", 0) < 4:
+                        return {
+                            "success": False,
+                            "scores": scores,
+                            "details": {
+                                "reason": (
+                                    "Final consultant relevance score below threshold: "
+                                    f"{consultant_judge.get('relevance_score')}"
+                                )
+                            },
+                        }
+                    details["final_consultant_judge"] = consultant_judge
+                else:
+                    return {
+                        "success": False,
+                        "scores": scores,
+                        "details": {"reason": "Final consultant judge returned empty result"},
+                    }
             except Exception as e:
-                details["final_consultant_judge_error"] = str(e)[:200]
+                return {
+                    "success": False,
+                    "scores": scores,
+                    "details": {"reason": f"Final consultant judge failed: {str(e)[:200]}"},
+                }
 
         final_code = None
         t4 = None
@@ -330,8 +386,41 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                         for k, v in rej_judge.items():
                             if "score" in k:
                                 scores[f"final_rejection_{k}"] = v
+                        if rej_judge.get("rejection_score", 0) < 4:
+                            return {
+                                "success": False,
+                                "scores": scores,
+                                "details": {
+                                    "reason": (
+                                        "Revision rejection score below threshold: "
+                                        f"{rej_judge.get('rejection_score')}"
+                                    )
+                                },
+                            }
+                        if rej_judge.get("alternative_score", 0) < 4:
+                            return {
+                                "success": False,
+                                "scores": scores,
+                                "details": {
+                                    "reason": (
+                                        "Revision rejection alternative score below threshold: "
+                                        f"{rej_judge.get('alternative_score')}"
+                                    )
+                                },
+                            }
+                        details["final_rejection_judge"] = rej_judge
+                    else:
+                        return {
+                            "success": False,
+                            "scores": scores,
+                            "details": {"reason": "Final rejection judge returned empty result"},
+                        }
                 except Exception as e:
-                    details["final_rejection_judge_error"] = str(e)[:200]
+                    return {
+                        "success": False,
+                        "scores": scores,
+                        "details": {"reason": f"Final rejection judge failed: {str(e)[:200]}"},
+                    }
 
             scores.setdefault("flow_score", 5.0)
         else:
@@ -390,8 +479,59 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                         for k, v in architect_judge.items():
                             if "score" in k:
                                 scores[f"final_architect_{k}"] = v
+                        if architect_judge.get("syntax_score", 0) < 4:
+                            return {
+                                "success": False,
+                                "scores": scores,
+                                "details": {
+                                    "reason": (
+                                        "Final architect syntax score below threshold: "
+                                        f"{architect_judge.get('syntax_score')}"
+                                    )
+                                },
+                            }
+                        if architect_judge.get("logic_score", 0) < 4:
+                            return {
+                                "success": False,
+                                "scores": scores,
+                                "details": {
+                                    "reason": (
+                                        "Final architect logic score below threshold: "
+                                        f"{architect_judge.get('logic_score')}"
+                                    )
+                                },
+                            }
+                        details["final_architect_judge"] = architect_judge
+                    else:
+                        return {
+                            "success": False,
+                            "scores": scores,
+                            "details": {"reason": "Final architect judge returned empty result"},
+                        }
                 except Exception as e:
-                    details["final_architect_judge_error"] = str(e)[:200]
+                    return {
+                        "success": False,
+                        "scores": scores,
+                        "details": {"reason": f"Final architect judge failed: {str(e)[:200]}"},
+                    }
+
+            # Compiler-level validation for final revised code.
+            try:
+                val_res = validate_nextflow(final_code, run_stub=(scenario.get("level", 1) >= 3))
+                details["final_nextflow_validation"] = val_res
+                if val_res.get("nf_syntax_passed") is False:
+                    return {
+                        "success": False,
+                        "scores": scores,
+                        "details": {
+                            "reason": (
+                                "Final revised code failed Nextflow syntax validation: "
+                                f"{val_res.get('nf_syntax_error', 'Unknown error')[:200]}"
+                            )
+                        },
+                    }
+            except Exception as e:
+                details["final_nextflow_validation_error"] = str(e)[:200]
 
             scores.setdefault("flow_score", 5.0)
 
@@ -401,14 +541,26 @@ def test_recreation_revision_two_stage_flow(scenario, api_client, store, judge_l
                 "turn2_status": t2.get("status"),
                 "turn3_status": t3.get("status"),
                 "turn4_status": t4.get("status") if t4 else None,
+                "turn1_reply": t1.get("reply"),
+                "turn2_reply": t2.get("reply"),
+                "turn3_reply": t3.get("reply"),
+                "turn4_reply": t4.get("reply") if t4 else None,
                 "initial_code_length": len(initial_code),
                 "final_code_length": len(final_code) if final_code else 0,
+                "initial_code": initial_code,
+                "final_code": final_code,
                 "expect_code_change": scenario.get("expect_code_change", False),
                 "must_include_final": scenario.get("must_include_final", []),
                 "revision_consultant_reply": t3.get("reply"),
                 "expect_rejection_on_revision": expect_rejection_on_revision,
                 "initial_expected_ids": initial_expected,
                 "revision_expected_ids": revision_expected,
+                "initial_found_ids": initial_found,
+                "revision_found_ids": revision_found,
+                "initial_missing_ids": missing_initial,
+                "revision_missing_ids": missing_revision,
+                "initial_rag_context": initial_context,
+                "revision_rag_context": revision_context,
             }
         )
 
