@@ -306,6 +306,168 @@ _LEGACY_LEVEL4_SCENARIOS = LEVEL4_SCENARIOS
 
 MODULE_REJECTION_SCENARIOS = [
     {
+        "id": "N1_26_missing_tool_cutadapt",
+        "level": 4,
+        "difficulty": "easy",
+        "description": "Reject: missing tools Cutadapt and BWA",
+        "chat_messages": [
+            "I want to trim my reads using Cutadapt and map them with BWA."
+        ],
+        "expect_rejection": True,
+        "template_ids": [],
+        "component_ids": ["step_1PP_trimming__fastp", "step_1PP_trimming__trimmomatic", "step_2AS_mapping__bowtie", "step_2AS_mapping__ivar"],
+        "expect_in_context": ["step_1PP_trimming__fastp", "step_1PP_trimming__trimmomatic", "step_2AS_mapping__bowtie", "step_2AS_mapping__ivar"],
+        "rejection_reason": (
+            "Cutadapt and BWA are not available in this framework. Use supported trimming and mapping tools such as "
+            "fastp/Trimmomatic and Bowtie2/iVar depending on sequencing type and objective."
+        ),
+    },
+    {
+        "id": "N1_27_wrong_organism_pangolin",
+        "level": 4,
+        "difficulty": "easy",
+        "description": "Reject: Pangolin on E. coli",
+        "chat_messages": [
+            "I have some E. coli reads and want to determine their lineage using Pangolin."
+        ],
+        "expect_rejection": True,
+        "template_ids": [],
+        "component_ids": ["step_4TY_lineage__pangolin", "step_4TY_MLST__mlst", "step_4TY_cgMLST__chewbbaca"],
+        "expect_in_context": ["step_4TY_lineage__pangolin", "step_4TY_MLST__mlst", "step_4TY_cgMLST__chewbbaca"],
+        "rejection_reason": (
+            "Pangolin is SARS-CoV-2 specific and cannot be used for bacterial lineage typing. "
+            "Use bacterial typing methods such as MLST or cgMLST instead."
+        ),
+    },
+    {
+        "id": "N1_28_incompatible_tech_spades",
+        "level": 4,
+        "difficulty": "easy",
+        "description": "Reject: SPAdes on Nanopore long reads",
+        "chat_messages": [
+            "I have Nanopore long reads and want to do de novo assembly using SPAdes."
+        ],
+        "expect_rejection": True,
+        "template_ids": [],
+        "component_ids": ["step_2AS_denovo__spades", "step_2AS_denovo__flye"],
+        "expect_in_context": ["step_2AS_denovo__spades", "step_2AS_denovo__flye"],
+        "rejection_reason": (
+            "SPAdes is for short-read workflows in this framework. For Nanopore long-read de novo assembly use Flye."
+        ),
+    },
+    {
+        "id": "N2_29_wrong_purpose_ivar",
+        "level": 4,
+        "difficulty": "medium",
+        "description": "Reject: iVar requested for de novo assembly",
+        "chat_messages": [
+            "Can you use iVar to do a de novo assembly of my unknown virus?"
+        ],
+        "expect_rejection": True,
+        "template_ids": [],
+        "component_ids": ["step_2AS_mapping__ivar", "step_2AS_denovo__spades", "step_2AS_denovo__unicycler"],
+        "expect_in_context": ["step_2AS_mapping__ivar", "step_2AS_denovo__spades", "step_2AS_denovo__unicycler"],
+        "rejection_reason": (
+            "iVar is a reference-based mapping/consensus tool and cannot perform de novo assembly."
+        ),
+    },
+    {
+        "id": "N2_30_missing_tool_canu_gatk",
+        "level": 4,
+        "difficulty": "medium",
+        "description": "Reject: Canu and GATK are unavailable",
+        "chat_messages": [
+            "I want to assemble my Illumina paired-end data using Canu and call variants with GATK."
+        ],
+        "expect_rejection": True,
+        "template_ids": [],
+        "component_ids": ["step_2AS_denovo__spades", "step_2AS_denovo__shovill", "step_2AS_mapping__ivar", "step_2AS_mapping__snippy"],
+        "expect_in_context": ["step_2AS_denovo__spades", "step_2AS_denovo__shovill", "step_2AS_mapping__ivar", "step_2AS_mapping__snippy"],
+        "rejection_reason": (
+            "Canu and GATK are not in the supported toolset. Use supported assemblers and mapping/variant tools instead."
+        ),
+    },
+    {
+        "id": "N2_31_missing_prerequisite_mlst",
+        "level": 4,
+        "difficulty": "medium",
+        "description": "Reject: MLST and Prokka directly on raw FASTQ",
+        "chat_messages": [
+            "I have raw Illumina FASTQ files and want to immediately run MLST and Prokka on them."
+        ],
+        "expect_rejection": True,
+        "template_ids": [],
+        "component_ids": ["step_4TY_MLST__mlst", "step_4AN_genes__prokka", "step_2AS_denovo__spades", "step_2AS_denovo__shovill"],
+        "expect_in_context": ["step_4TY_MLST__mlst", "step_4AN_genes__prokka", "step_2AS_denovo__spades", "step_2AS_denovo__shovill"],
+        "rejection_reason": (
+            "MLST and Prokka require assembled contigs/genomes as input. Assemble first, then run typing/annotation."
+        ),
+    },
+    {
+        "id": "N2_32_wrong_organism_purpose_westnile",
+        "level": 4,
+        "difficulty": "medium",
+        "description": "Reject: Westnile and KmerFinder used for wrong purposes",
+        "chat_messages": [
+            "I want to use Westnile to find the lineage of my Salmonella samples, and Kmerfinder to assign lineages."
+        ],
+        "expect_rejection": True,
+        "template_ids": [],
+        "component_ids": ["step_4TY_lineage__westnile", "step_3TX_species__kmerfinder", "step_4TY_MLST__mlst"],
+        "expect_in_context": ["step_4TY_lineage__westnile", "step_3TX_species__kmerfinder", "step_4TY_MLST__mlst"],
+        "rejection_reason": (
+            "Westnile lineage tooling is specific to West Nile Virus, and KmerFinder is for species ID, not lineage assignment."
+        ),
+    },
+    {
+        "id": "N3_33_complex_missing_tools",
+        "level": 4,
+        "difficulty": "complex",
+        "description": "Reject: Trimgalore, HISAT2, and MEGAHIT are unavailable",
+        "chat_messages": [
+            "Build a pipeline that trims Nanopore reads with Trimgalore, maps to human with HISAT2, and uses MEGAHIT for metagenomic assembly."
+        ],
+        "expect_rejection": True,
+        "template_ids": [],
+        "component_ids": ["step_1PP_trimming__chopper", "step_2AS_mapping__minimap2", "step_2MG_denovo__metaspades"],
+        "expect_in_context": ["step_1PP_trimming__chopper", "step_2AS_mapping__minimap2", "step_2MG_denovo__metaspades"],
+        "rejection_reason": (
+            "Requested tools are not available in this framework. Use supported alternatives for Nanopore trimming, mapping, and metagenomic assembly."
+        ),
+    },
+    {
+        "id": "N3_34_complex_prerequisite_mismatch",
+        "level": 4,
+        "difficulty": "complex",
+        "description": "Reject: multiple incompatibilities in one request",
+        "chat_messages": [
+            "Take raw Illumina reads, run Pangolin first, then assemble with Flye, and run flaA typing to check if it's Staphylococcus."
+        ],
+        "expect_rejection": True,
+        "template_ids": [],
+        "component_ids": ["step_4TY_lineage__pangolin", "step_2AS_denovo__flye", "step_4TY_flaA__flaA", "step_2AS_denovo__spades"],
+        "expect_in_context": ["step_4TY_lineage__pangolin", "step_2AS_denovo__flye", "step_4TY_flaA__flaA", "step_2AS_denovo__spades"],
+        "rejection_reason": (
+            "The request combines incompatible operations: Pangolin requires SARS-CoV-2 consensus input, Flye is for long reads, and flaA typing is Campylobacter-specific."
+        ),
+    },
+    {
+        "id": "N3_35_complex_wrong_purpose",
+        "level": 4,
+        "difficulty": "complex",
+        "description": "Reject: FreeBayes missing and Porechop misused",
+        "chat_messages": [
+            "Use FreeBayes for de novo assembly, then run Porechop on assembled contigs to remove adapters."
+        ],
+        "expect_rejection": True,
+        "template_ids": [],
+        "component_ids": ["step_2AS_denovo__spades", "step_2AS_denovo__unicycler", "step_1PP_trimming__chopper"],
+        "expect_in_context": ["step_2AS_denovo__spades", "step_2AS_denovo__unicycler", "step_1PP_trimming__chopper"],
+        "rejection_reason": (
+            "FreeBayes is not available and is not a de novo assembler. Adapter trimming tools are applied to raw reads, not assembled contigs."
+        ),
+    },
+    {
         "id": "module_draft_genome_reject_bwa",
         "level": 4,
         "difficulty": "easy",
