@@ -12,6 +12,8 @@ Complexity: MEDIUM
   - Expected: system selects appropriate template and builds pipeline
 """
 
+import os
+
 LEVEL2_SCENARIOS = [
     {
         "id": "L2_01_covid_mapping_lineage",
@@ -367,3 +369,20 @@ LEVEL2_SCENARIOS = [
         ),
     },
 ]
+
+_LEGACY_LEVEL2_SCENARIOS = LEVEL2_SCENARIOS
+NEW_LEVEL2_SCENARIOS = []
+
+OLD_LEVEL2_TEST_IDS = [s["id"] for s in _LEGACY_LEVEL2_SCENARIOS]
+NEW_LEVEL2_TEST_IDS = [s["id"] for s in NEW_LEVEL2_SCENARIOS]
+
+
+def _env_enabled(var_name: str) -> bool:
+    return os.getenv(var_name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+if _env_enabled("ONLY_NEW_SCENARIOS"):
+    print("[tests] ONLY_NEW_SCENARIOS is enabled: not testing old Level 2 scenarios.")
+    LEVEL2_SCENARIOS = NEW_LEVEL2_SCENARIOS
+else:
+    LEVEL2_SCENARIOS = _LEGACY_LEVEL2_SCENARIOS + NEW_LEVEL2_SCENARIOS

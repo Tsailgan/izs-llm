@@ -12,6 +12,8 @@ Complexity: COMPLEX
   - Expected: system builds a complete, functional multi-step pipeline
 """
 
+import os
+
 LEVEL3_SCENARIOS = [
     {
         "id": "L3_01_bacteria_typing_full",
@@ -198,3 +200,20 @@ LEVEL3_SCENARIOS = [
         "selected_module_ids": [],
     },
 ]
+
+_LEGACY_LEVEL3_SCENARIOS = LEVEL3_SCENARIOS
+NEW_LEVEL3_SCENARIOS = []
+
+OLD_LEVEL3_TEST_IDS = [s["id"] for s in _LEGACY_LEVEL3_SCENARIOS]
+NEW_LEVEL3_TEST_IDS = [s["id"] for s in NEW_LEVEL3_SCENARIOS]
+
+
+def _env_enabled(var_name: str) -> bool:
+    return os.getenv(var_name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+if _env_enabled("ONLY_NEW_SCENARIOS"):
+    print("[tests] ONLY_NEW_SCENARIOS is enabled: not testing old Level 3 scenarios.")
+    LEVEL3_SCENARIOS = NEW_LEVEL3_SCENARIOS
+else:
+    LEVEL3_SCENARIOS = _LEGACY_LEVEL3_SCENARIOS + NEW_LEVEL3_SCENARIOS

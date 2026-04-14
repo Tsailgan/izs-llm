@@ -17,6 +17,8 @@ Expected behavior:
   - AI explains WHY and suggests valid alternatives
 """
 
+import os
+
 LEVEL4_SCENARIOS = [
     {
         "id": "L4_01_bwa_not_available",
@@ -299,3 +301,197 @@ LEVEL4_SCENARIOS = [
         ),
     },
 ]
+
+_LEGACY_LEVEL4_SCENARIOS = LEVEL4_SCENARIOS
+
+MODULE_REJECTION_SCENARIOS = [
+    {
+        "id": "module_draft_genome_reject_bwa",
+        "level": 4,
+        "difficulty": "easy",
+        "description": "Reject: module_draft_genome request with unavailable BWA",
+        "chat_messages": [
+            "I have some short reads and a reference genome. I want to build a consensus. Please map the reads with bwa first."
+        ],
+        "expect_rejection": True,
+        "template_ids": ["module_draft_genome"],
+        "component_ids": ["step_2AS_mapping__bowtie", "step_2AS_mapping__ivar", "step_2AS_mapping__snippy"],
+        "expect_in_context": ["module_draft_genome", "step_2AS_mapping__bowtie", "step_2AS_mapping__ivar", "step_2AS_mapping__snippy"],
+        "rejection_reason": (
+            "BWA is not available in this framework. For short-read consensus workflows use supported mapping/consensus tools "
+            "such as Bowtie2 (step_2AS_mapping__bowtie), iVar (step_2AS_mapping__ivar), or Snippy "
+            "(step_2AS_mapping__snippy) depending on the workflow design."
+        ),
+    },
+    {
+        "id": "module_denovo_reject_spades_nanopore",
+        "level": 4,
+        "difficulty": "medium",
+        "description": "Reject: module_denovo request using SPAdes on Nanopore",
+        "chat_messages": [
+            "I want to remove host dna from my nanopore reads. Then I want to assemble them into contigs using spades."
+        ],
+        "expect_rejection": True,
+        "template_ids": ["module_denovo"],
+        "component_ids": ["step_1PP_hostdepl__minimap2", "step_2AS_denovo__spades", "step_2AS_denovo__flye"],
+        "expect_in_context": ["module_denovo", "step_1PP_hostdepl__minimap2", "step_2AS_denovo__spades", "step_2AS_denovo__flye"],
+        "rejection_reason": (
+            "For Nanopore long reads, SPAdes (step_2AS_denovo__spades) is not the recommended assembler under the guardrail rules. "
+            "Use Minimap2-based host depletion (step_1PP_hostdepl__minimap2) and Flye (step_2AS_denovo__flye) for long-read assembly."
+        ),
+    },
+    {
+        "id": "module_covid_emergency_reject_missing_mapping",
+        "level": 4,
+        "difficulty": "easy",
+        "description": "Reject: Pangolin requested directly on raw SARS-CoV-2 reads",
+        "chat_messages": [
+            "I have raw sars cov 2 fastq reads. I want to run pangolin on them to find the lineage."
+        ],
+        "expect_rejection": True,
+        "template_ids": ["module_covid_emergency"],
+        "component_ids": ["step_4TY_lineage__pangolin", "step_2AS_mapping__ivar"],
+        "expect_in_context": ["module_covid_emergency", "step_4TY_lineage__pangolin", "step_2AS_mapping__ivar"],
+        "rejection_reason": (
+            "Pangolin (step_4TY_lineage__pangolin) requires a consensus sequence, not raw FASTQ reads. "
+            "Run reference-based consensus first with iVar (step_2AS_mapping__ivar), then classify lineage with Pangolin."
+        ),
+    },
+    {
+        "id": "module_typing_bacteria_reject_mlst_virus",
+        "level": 4,
+        "difficulty": "medium",
+        "description": "Reject: MLST requested for SARS-CoV-2 assembly",
+        "chat_messages": [
+            "I have a sars cov 2 assembly. I need to find the genes and run mlst to type it."
+        ],
+        "expect_rejection": True,
+        "template_ids": ["module_typing_bacteria"],
+        "component_ids": ["step_4TY_MLST__mlst", "step_4TY_lineage__pangolin", "step_4AN_genes__prokka"],
+        "expect_in_context": ["module_typing_bacteria", "step_4TY_MLST__mlst", "step_4TY_lineage__pangolin", "step_4AN_genes__prokka"],
+        "rejection_reason": (
+            "MLST (step_4TY_MLST__mlst) is for bacterial typing and is invalid for SARS-CoV-2. "
+            "For SARS-CoV-2 typing/lineage use Pangolin (step_4TY_lineage__pangolin)."
+        ),
+    },
+    {
+        "id": "module_reads_processing_reject_trimgalore",
+        "level": 4,
+        "difficulty": "easy",
+        "description": "Reject: TrimGalore not available in module_reads_processing request",
+        "chat_messages": [
+            "I want to check my raw reads quality. Then I want to trim them using trimgalore."
+        ],
+        "expect_rejection": True,
+        "template_ids": ["module_reads_processing"],
+        "component_ids": ["step_1PP_trimming__fastp", "step_1PP_trimming__trimmomatic", "step_0SQ_rawreads__fastq"],
+        "expect_in_context": ["module_reads_processing", "step_1PP_trimming__fastp", "step_1PP_trimming__trimmomatic", "step_0SQ_rawreads__fastq"],
+        "rejection_reason": (
+            "TrimGalore is not available in this framework. For read trimming use fastp "
+            "(step_1PP_trimming__fastp) or Trimmomatic (step_1PP_trimming__trimmomatic)."
+        ),
+    },
+    {
+        "id": "module_wgs_bacteria_reject_canu",
+        "level": 4,
+        "difficulty": "easy",
+        "description": "Reject: Canu not available for bacterial Illumina de novo assembly",
+        "chat_messages": [
+            "I have bacterial illumina sequencing data. I want to do a de novo assembly using canu."
+        ],
+        "expect_rejection": True,
+        "template_ids": ["module_wgs_bacteria"],
+        "component_ids": ["step_2AS_denovo__spades", "step_2AS_denovo__shovill", "step_2AS_denovo__unicycler"],
+        "expect_in_context": ["module_wgs_bacteria", "step_2AS_denovo__spades", "step_2AS_denovo__shovill", "step_2AS_denovo__unicycler"],
+        "rejection_reason": (
+            "Canu is not available in this framework. For bacterial Illumina de novo assembly use supported options such as "
+            "SPAdes (step_2AS_denovo__spades), Shovill (step_2AS_denovo__shovill), or Unicycler (step_2AS_denovo__unicycler)."
+        ),
+    },
+    {
+        "id": "module_filtered_denovo_reject_bowtie_longreads",
+        "level": 4,
+        "difficulty": "medium",
+        "description": "Reject: Bowtie requested for Nanopore long-read filtering",
+        "chat_messages": [
+            "I want to filter my nanopore long reads using bowtie. Then I need to assemble them into contigs."
+        ],
+        "expect_rejection": True,
+        "template_ids": ["module_filtered_denovo"],
+        "component_ids": ["step_1PP_filtering__bowtie", "step_1PP_filtering__minimap2", "step_2AS_denovo__flye"],
+        "expect_in_context": ["module_filtered_denovo", "step_1PP_filtering__bowtie", "step_1PP_filtering__minimap2", "step_2AS_denovo__flye"],
+        "rejection_reason": (
+            "Bowtie2 (step_1PP_filtering__bowtie) is intended for short-read mapping/filtering. "
+            "For Nanopore long reads use Minimap2 filtering (step_1PP_filtering__minimap2), then assemble with Flye "
+            "(step_2AS_denovo__flye)."
+        ),
+    },
+    {
+        "id": "module_draft_genome_reject_spades_consensus",
+        "level": 4,
+        "difficulty": "complex",
+        "description": "Reject: SPAdes requested for reference-based consensus",
+        "chat_messages": [
+            "I have some short reads and a reference genome. I want to map the reads and build a consensus using spades. After that I need to find the genes."
+        ],
+        "expect_rejection": True,
+        "template_ids": ["module_draft_genome"],
+        "component_ids": ["step_2AS_denovo__spades", "step_2AS_mapping__ivar", "step_2AS_mapping__snippy", "step_4AN_genes__prokka"],
+        "expect_in_context": ["module_draft_genome", "step_2AS_denovo__spades", "step_2AS_mapping__ivar", "step_2AS_mapping__snippy", "step_4AN_genes__prokka"],
+        "rejection_reason": (
+            "SPAdes (step_2AS_denovo__spades) is a de novo assembler and cannot produce reference-based consensus. "
+            "For consensus from mapped reads use iVar (step_2AS_mapping__ivar) or Snippy (step_2AS_mapping__snippy), then annotate with Prokka "
+            "(step_4AN_genes__prokka)."
+        ),
+    },
+    {
+        "id": "module_denovo_reject_incompatible_spades",
+        "level": 4,
+        "difficulty": "complex",
+        "description": "Reject: Nanopore de novo request forces SPAdes in host-depleted flow",
+        "chat_messages": [
+            "I have nanopore long reads. I want to deplete the host reads using minimap2. After that I want to do a de novo assembly using spades and find amr genes."
+        ],
+        "expect_rejection": True,
+        "template_ids": ["module_denovo"],
+        "component_ids": ["step_1PP_hostdepl__minimap2", "step_2AS_denovo__spades", "step_2AS_denovo__flye", "step_4AN_AMR__abricate"],
+        "expect_in_context": ["module_denovo", "step_1PP_hostdepl__minimap2", "step_2AS_denovo__spades", "step_2AS_denovo__flye", "step_4AN_AMR__abricate"],
+        "rejection_reason": (
+            "For long-read Nanopore assembly in this guardrail setting, SPAdes (step_2AS_denovo__spades) is not the valid choice. "
+            "Use Minimap2 host depletion (step_1PP_hostdepl__minimap2), assemble with Flye (step_2AS_denovo__flye), then run AMR analysis such as ABRicate "
+            "(step_4AN_AMR__abricate) on the resulting assembly."
+        ),
+    },
+    {
+        "id": "module_variant_lineage_reject_wrong_organism",
+        "level": 4,
+        "difficulty": "complex",
+        "description": "Reject: Pangolin requested for Campylobacter",
+        "chat_messages": [
+            "I have raw reads from campylobacter. I want to map them to a reference genome. Then I want to use pangolin to find the lineage and prokka for genes."
+        ],
+        "expect_rejection": True,
+        "template_ids": ["module_variant_lineage"],
+        "component_ids": ["step_4TY_lineage__pangolin", "step_4TY_MLST__mlst", "step_4TY_flaA__flaA", "step_4AN_genes__prokka"],
+        "expect_in_context": ["module_variant_lineage", "step_4TY_lineage__pangolin", "step_4TY_MLST__mlst", "step_4TY_flaA__flaA", "step_4AN_genes__prokka"],
+        "rejection_reason": (
+            "Pangolin (step_4TY_lineage__pangolin) is only for SARS-CoV-2 lineage assignment and cannot be used for Campylobacter. "
+            "For Campylobacter typing, use bacterial typing tools such as MLST (step_4TY_MLST__mlst) or flaA typing "
+            "(step_4TY_flaA__flaA)."
+        ),
+    },
+]
+
+OLD_LEVEL4_TEST_IDS = [s["id"] for s in _LEGACY_LEVEL4_SCENARIOS]
+NEW_LEVEL4_TEST_IDS = [s["id"] for s in MODULE_REJECTION_SCENARIOS]
+
+
+def _env_enabled(var_name: str) -> bool:
+    return os.getenv(var_name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+if _env_enabled("ONLY_NEW_SCENARIOS"):
+    print("[tests] ONLY_NEW_SCENARIOS is enabled: not testing old Level 4 scenarios.")
+    LEVEL4_SCENARIOS = MODULE_REJECTION_SCENARIOS
+else:
+    LEVEL4_SCENARIOS = _LEGACY_LEVEL4_SCENARIOS + MODULE_REJECTION_SCENARIOS

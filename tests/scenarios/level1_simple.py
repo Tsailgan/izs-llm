@@ -12,6 +12,8 @@ Complexity: SIMPLE
   - Expected: system identifies the tool and builds a basic pipeline
 """
 
+import os
+
 LEVEL1_SCENARIOS = [
     {
         "id": "L1_01_fastp_trim",
@@ -189,3 +191,20 @@ LEVEL1_SCENARIOS = [
         "selected_module_ids": [],
     },
 ]
+
+_LEGACY_LEVEL1_SCENARIOS = LEVEL1_SCENARIOS
+NEW_LEVEL1_SCENARIOS = []
+
+OLD_LEVEL1_TEST_IDS = [s["id"] for s in _LEGACY_LEVEL1_SCENARIOS]
+NEW_LEVEL1_TEST_IDS = [s["id"] for s in NEW_LEVEL1_SCENARIOS]
+
+
+def _env_enabled(var_name: str) -> bool:
+    return os.getenv(var_name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+if _env_enabled("ONLY_NEW_SCENARIOS"):
+    print("[tests] ONLY_NEW_SCENARIOS is enabled: not testing old Level 1 scenarios.")
+    LEVEL1_SCENARIOS = NEW_LEVEL1_SCENARIOS
+else:
+    LEVEL1_SCENARIOS = _LEGACY_LEVEL1_SCENARIOS + NEW_LEVEL1_SCENARIOS

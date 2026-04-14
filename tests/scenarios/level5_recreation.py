@@ -11,6 +11,7 @@ These tests use the run_multi_turn_chat() API client and the CodeRecreationEval 
 The reference code is loaded at runtime from data/code_store_hollow.jsonl.
 """
 import json
+import os
 from pathlib import Path
 
 # ──────────────────────────────────────────────────────────────
@@ -293,3 +294,20 @@ LEVEL5_SCENARIOS = [
         "expect_in_context": ["module_vdraft_light"],
     },
 ]
+
+_LEGACY_LEVEL5_SCENARIOS = LEVEL5_SCENARIOS
+NEW_LEVEL5_SCENARIOS = []
+
+OLD_LEVEL5_TEST_IDS = [s["id"] for s in _LEGACY_LEVEL5_SCENARIOS]
+NEW_LEVEL5_TEST_IDS = [s["id"] for s in NEW_LEVEL5_SCENARIOS]
+
+
+def _env_enabled(var_name: str) -> bool:
+    return os.getenv(var_name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+if _env_enabled("ONLY_NEW_SCENARIOS"):
+    print("[tests] ONLY_NEW_SCENARIOS is enabled: not testing old Level 5 scenarios.")
+    LEVEL5_SCENARIOS = NEW_LEVEL5_SCENARIOS
+else:
+    LEVEL5_SCENARIOS = _LEGACY_LEVEL5_SCENARIOS + NEW_LEVEL5_SCENARIOS
