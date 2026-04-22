@@ -1,9 +1,3 @@
-"""
-tests/evaluation/schemas.py
-Pydantic models for LLM judge outputs.
-Each model captures both the reasoning chain and the numerical score,
-forcing the judge to explain before scoring (chain-of-thought).
-"""
 from pydantic import BaseModel, Field
 
 

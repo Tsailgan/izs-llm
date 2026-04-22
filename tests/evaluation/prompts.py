@@ -1,16 +1,3 @@
-"""
-tests/evaluation/prompts.py
-Expert-level LLM judge prompts for evaluating the IZS Nextflow AI Agent.
-
-Design principles:
-  - Detailed 5-level ordinal rubrics with concrete examples at every level
-  - Bias-reduction: explicit "do not penalize" clauses
-  - Domain perspective: veterinary genomics / public health surveillance
-  - Reasoning-first: the judge must explain before scoring
-
-All prompts are ChatPromptTemplate instances ready for use with
-  `(prompt | judge_llm).invoke({...})`.
-"""
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from app.services.agents import CONSULTANT_SYSTEM_PROMPT
 
