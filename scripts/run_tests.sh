@@ -13,7 +13,6 @@
 TYPE=$1
 FILTER=$2
 
-# Map shorthand to file paths
 case $TYPE in
     rag)        TARGET="tests/test_rag.py" ;;
     consultant) TARGET="tests/test_consultant.py" ;;
@@ -23,7 +22,16 @@ case $TYPE in
     *)          TARGET="tests/" ;;
 esac
 
-# Handle filter if first arg was a filter instead of a type
+  if [[ -z "${ONLY_NEW_SCENARIOS+x}" ]]; then
+    export ONLY_NEW_SCENARIOS=1
+    echo "ONLY_NEW_SCENARIOS not set. Defaulting to 1 (not testing old tests)."
+  fi
+
+  if [[ "$TYPE" == "rejection" && -z "${ONLY_NEW_REJECTION_SCENARIOS+x}" ]]; then
+    export ONLY_NEW_REJECTION_SCENARIOS="${ONLY_NEW_SCENARIOS}"
+    echo "ONLY_NEW_REJECTION_SCENARIOS not set. Mirroring ONLY_NEW_SCENARIOS=${ONLY_NEW_SCENARIOS}."
+fi
+
 if [[ -z "$FILTER" && "$TYPE" != "rag" && "$TYPE" != "consultant" && "$TYPE" != "execution" && "$TYPE" != "rejection" && "$TYPE" != "recreation" && "$TYPE" != "all" && -n "$TYPE" ]]; then
     TARGET="tests/"
     FILTER=$TYPE
@@ -37,7 +45,6 @@ docker compose exec api pip install pytest httpx
 
 echo "Starting the tests for: ${TARGET:-all} ${FILTER:+with filter: $FILTER}"
 
-# Build the -k flag if filter exists
 K_FLAG=""
 if [ -n "$FILTER" ]; then
     K_FLAG="-k $FILTER"
@@ -45,8 +52,10 @@ fi
 
 # No need for external networking setup!
 docker compose exec \
-  -e GROQ_API_KEY="key" \
-  -e MISTRAL_API_KEY="key" \
+  -e JUDGE_BASE_URL="" \
+  -e MISTRAL_API_KEY="" \
+  -e ONLY_NEW_SCENARIOS="${ONLY_NEW_SCENARIOS}" \
+  -e ONLY_NEW_REJECTION_SCENARIOS="${ONLY_NEW_REJECTION_SCENARIOS}" \
   api pytest "$TARGET" -v -s $K_FLAG -W ignore::DeprecationWarning
 
 echo "Finished running tests."
