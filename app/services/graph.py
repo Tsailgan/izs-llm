@@ -13,7 +13,7 @@ from app.services.architect_tools import ARCHITECT_TOOLS
 
 # Safety cap on tool-calling iterations to prevent runaway loops
 MAX_TOOL_ITERATIONS = 5
-MAX_TOOL_ITERATIONS_APPROVAL = 2  # Tighter limit when user already approved
+MAX_TOOL_ITERATIONS_APPROVAL = 0  # Tighter limit when user already approved
 
 # Approval keywords — if the user's message matches, limit tool calls
 APPROVAL_PATTERNS = {

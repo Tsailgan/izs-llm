@@ -289,18 +289,29 @@ def architect_reason_node(state: GraphState, store: BaseStore):
     llm_with_tools = llm.bind_tools(ARCHITECT_TOOLS)
     
     from langchain_core.messages import SystemMessage
-    system_msg = SystemMessage(content=(
-        "You are a Nextflow DSL2 code architect. You previously attempted to generate "
-        "a pipeline AST but validation failed. You now have tools to look up component "
-        "source code and verify channel connections.\n\n"
-        "TOOLS:\n"
-        "1. `lookup_component_code(component_id)` — Read a component's source code\n"
-        "2. `verify_channel_connection(source_id, target_id)` — Check if two components can connect\n\n"
-        "TASK: Use the tools to investigate the validation error below, then explain "
-        "what needs to be fixed. Be specific about channel names and connections.\n\n"
-        f"VALIDATION ERROR:\n{validation_error}\n\n"
-        f"PLAN:\n{plan}"
-    ))
+    system_template = """You are a Nextflow DSL2 code architect. You previously attempted to generate \
+a pipeline AST but validation failed. You now have tools to look up component \
+source code and verify channel connections.
+
+TOOLS:
+1. `lookup_component_code(component_id)` — Read a component's source code
+2. `verify_channel_connection(source_id, target_id)` — Check if two components can connect
+
+TASK: Use the tools to investigate the validation error below, then explain \
+what needs to be fixed. Be specific about channel names and connections.
+
+VALIDATION ERROR:
+{validation_error}
+
+PLAN:
+{plan}"""
+    
+    system_content = system_template.format(
+        validation_error=validation_error,
+        plan=plan
+    )
+    
+    system_msg = SystemMessage(content=system_content)
     
     prompt = ChatPromptTemplate.from_messages([
         system_msg,
