@@ -4,6 +4,12 @@ from app.core.loader import data_loader
 from app.core.config import settings
 from app.services.graph_state import GraphState
 from collections import defaultdict
+from app.services.query_normalizer import (
+    IGNORE_WORDS,
+    build_semantic_query,
+    is_discovery_query,
+    normalize_query,
+)
 
 from langgraph.store.base import BaseStore
 
@@ -83,193 +89,18 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
     found_ids = set()
     context_blocks = []
     
-    # ══════════════════════════════════════════════════════════════════════════
-    # STAGE 0 — QUERY PRE-PROCESSING & NORMALIZATION
-    # ══════════════════════════════════════════════════════════════════════════
-    query_lower = user_query.lower()
+    query_info = normalize_query(user_query)
+    query_lower = query_info["query_lower"]
+    clean_query = query_info["clean_query"]
+    query_tokens = query_info["query_tokens"]
 
-    # Multi-word & acronym normalization
-    # Collapses domain-specific multi-word terms and common acronyms into
-    # single canonical tokens so they match catalog entries reliably.
-    bio_replacements = {
-        # Sequencing technology aliases
-        "de novo": "denovo",
-        "paired end": "paired",
-        "paired-end": "paired",
-        "single end": "single",
-        "single-end": "single",
-        "short reads": "illumina",
-        "short-reads": "illumina",
-        "long reads": "nanopore",
-        "long-reads": "nanopore",
-        "oxford nanopore": "nanopore",
-        "ont": "nanopore",
-        "ion torrent": "ion",
-        "ion-torrent": "ion",
-        # Assay / protocol aliases
-        "rna seq": "rnaseq",
-        "rna-seq": "rnaseq",
-        "chip seq": "chipseq",
-        "chip-seq": "chipseq",
-        "quality control": "qc",
-        "quality check": "qc",
-        "quality assessment": "qc",
-        # Organism / pathogen aliases
-        "sars cov 2": "sarscov2",
-        "sars-cov-2": "sarscov2",
-        "sars cov2": "sarscov2",
-        "covid 19": "covid19",
-        "covid-19": "covid19",
-        "west nile": "westnile",
-        "west-nile": "westnile",
-        "e coli": "escherichia",
-        "e. coli": "escherichia",
-        # Tool name normalization
-        "kraken 2": "kraken2",
-        "kraken-2": "kraken2",
-        "iq tree": "iqtree",
-        "iq-tree": "iqtree",
-        "k snp": "ksnp3",
-        "mob suite": "mobsuite",
-        "mob-suite": "mobsuite",
-        # Domain phrase aliases
-        "16 s": "16s",
-        "wgs": "wholegenome",
-        "whole genome": "wholegenome",
-        "whole-genome": "wholegenome",
-        "core genome": "coregenome",
-        "core-genome": "coregenome",
-        "antimicrobial resistance": "amr",
-        "antibiotic resistance": "amr",
-        "resistance genes": "amr",
-        "virulence factors": "virulence",
-        "virulence factor": "virulence",
-        "sequence typing": "mlst",
-        "host depletion": "hostdepl",
-        "host removal": "hostdepl",
-        "host decontamination": "hostdepl",
-        "positive selection": "filtering",
-        "minimum spanning tree": "mst",
-        "phylogenetic tree": "phylogeny",
-        "reference based": "mapping",
-        "reference-based": "mapping",
-        "coverage depth": "coverage",
-    }
-
-    for old, new in bio_replacements.items():
-        query_lower = query_lower.replace(old, new)
-
-    # Strip rogue punctuation (keeps alphanumeric, spaces, underscores)
-    query_lower = re.sub(r'[^\w\s\_]', ' ', query_lower)
-    clean_query = query_lower.strip()
-
-    # Tokenize into a set of whole words
-    base_tokens = set(re.findall(r'\b\w+\b', query_lower))
-    query_tokens = set()
-
-    # Lightweight morphological expansion (stemming suffixes)
-    for t in base_tokens:
-        query_tokens.add(t)
-        if len(t) > 4:
-            if t.endswith('ing'):   query_tokens.add(t[:-3])
-            if t.endswith('ed'):    query_tokens.add(t[:-2])
-            if t.endswith('ies'):   query_tokens.add(t[:-3] + 'y')
-            if t.endswith('ation'): query_tokens.add(t[:-5] + 'e')
-            if t.endswith('er'):    query_tokens.add(t[:-2])
-            if t.endswith('ment'):  query_tokens.add(t[:-4])
-            if t.endswith('ment'):  query_tokens.add(t[:-4] + 'e')
-            if t.endswith('ness'):  query_tokens.add(t[:-4])
-            if t.endswith('ous'):   query_tokens.add(t[:-3])
-            if t.endswith('ive'):   query_tokens.add(t[:-3] + 'e')
-        if len(t) > 3 and t.endswith('s') and not t.endswith('ss'): 
-            query_tokens.add(t[:-1])
-
-    # Bioinformatics synonym expansion
-    # If ANY word in a synonym group appears in the query, ALL related words
-    # are injected into the token set to broaden recall.
-    bio_synonyms = {
-        # Preprocessing
-        "trim":         ["trimming", "adapter", "quality", "fastp", "trimmomatic", "chopper", "preprocessing", "clean"],
-        "downsample":   ["downsampling", "normalize", "depth", "bbnorm", "subsampling", "coverage"],
-        "hostdepl":     ["host", "depletion", "decontamination", "bowtie", "minimap2", "background"],
-        "filtering":    ["filter", "positive", "selection", "retain", "enrich", "extract"],
-        # Assembly
-        "assembly":     ["assemble", "assembler", "denovo", "contigs", "scaffolds", "spades", "shovill", "unicycler", "flye"],
-        "hybrid":       ["hybrid", "short", "long", "combined", "unicycler"],
-        "consensus":    ["mapping", "alignment", "reference", "bowtie", "minimap2", "medaka", "ivar", "snippy", "polish"],
-        "metagenomics": ["metagenomic", "metaspades", "microbiome", "community", "environmental"],
-        # Taxonomy
-        "taxonomy":     ["classify", "classification", "taxa", "species", "kraken", "kraken2", "centrifuge", "bracken", "taxonomic"],
-        "species":      ["identification", "predict", "kmerfinder", "mash", "organism"],
-        # Typing & Epidemiology
-        "mlst":         ["typing", "sequence", "clonal", "complex", "pubmlst", "epidemiology"],
-        "cgmlst":       ["chewbbaca", "allele", "allelic", "wgmlst", "coregenome", "profile"],
-        "lineage":      ["pangolin", "sarscov2", "covid19", "westnile", "pango", "variant"],
-        # AMR & Virulence
-        "amr":          ["resistance", "antimicrobial", "antibiotic", "resfinder", "staramr", "abricate"],
-        "virulence":    ["vfdb", "pathogenicity", "virulence", "abricate"],
-        # Annotation
-        "annotation":   ["annotate", "prokka", "gene", "protein", "gff", "genbank", "functional"],
-        # Phylogeny & Clustering
-        "phylogeny":    ["tree", "clustering", "mst", "distance", "newick", "augur", "nextstrain", "reportree", "grapetree", "iqtree", "phylogenetic"],
-        "snp":          ["variant", "snv", "calling", "vcf", "mutation", "snippy", "cfsan"],
-        "pangenome":    ["panaroo", "core", "gene", "presence", "absence", "mafft"],
-        # Quality Control
-        "qc":           ["fastqc", "nanoplot", "quast", "quality", "check", "report", "n50", "statistics"],
-        # Variant calling
-        "variant":      ["snp", "snv", "calling", "vcf", "mutation", "ivar", "snippy"],
-        # Plasmid
-        "plasmid":      ["plasmidspades", "mobsuite", "mob_recon", "replicon", "extrachromosomal", "mobile"],
-        # Contamination
-        "contamination":["confindr", "purity", "mixed", "strain", "intra"],
-    }
-    
-    for base, syns in bio_synonyms.items():
-        if base in query_tokens or any(s in query_tokens for s in syns):
-            query_tokens.add(base)
-            query_tokens.update(syns)
+    if not clean_query:
+        return "Query too broad. Provide more details to search the catalog."
 
     # ══════════════════════════════════════════════════════════════════════════
     # STAGE 1 — DISCOVERY / SUGGESTION INTENT DETECTION
     # ══════════════════════════════════════════════════════════════════════════
-    is_discovery = False
-    
-    # Very short generic queries (under 15 chars) are almost always exploratory
-    if len(clean_query) < 15 and clean_query != "":
-        is_discovery = True
-        
-    # Conversational phrases that signal catalog browsing
-    discovery_phrases = [
-        "what can i", "what can you do", "what do you have", "what do we have",
-        "what tools", "which tools", "what pipelines", "what modules",
-        "what's supported", "what is supported", "available options",
-        "available tools", "available pipelines", "system capabilities",
-        "show me everything", "list everything", "what components",
-        "what steps", "tell me about", "what analyses", "what is available",
-        "supported analyses", "supported workflows", "what workflows",
-        "give me an overview", "show all", "list all",
-        "capabilities", "functionality", "feature list",
-    ]
-    if not is_discovery and any(p in clean_query for p in discovery_phrases):
-        is_discovery = True
-        
-    # Action + target noun combinations (e.g. "suggest tools", "show pipelines")
-    action_words = [
-        "suggest", "list", "show", "recommend", "overview", "catalog",
-        "options", "give", "help", "describe", "what", "display", "browse",
-        "explore", "summarize", "enumerate",
-    ]
-    target_nouns = [
-        "tool", "tools", "pipeline", "pipelines", "module", "modules",
-        "capability", "capabilities", "system", "component", "components",
-        "step", "steps", "workflow", "workflows", "analysis", "analyses",
-    ]
-    
-    if not is_discovery:
-        has_action = any(re.search(rf'\b{v}\b', clean_query) for v in action_words)
-        has_target = any(re.search(rf'\b{n}\b', clean_query) for n in target_nouns)
-        if has_action and has_target:
-            is_discovery = True
+    is_discovery = is_discovery_query(clean_query)
 
     # Inject capability map when the user is exploring the catalog
     if is_discovery:
@@ -299,6 +130,29 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                 for domain_name, tools_list in sorted(domain_groups.items()):
                     unique_tools = sorted(list(set(tools_list)))
                     suggestion_block += f"- *{domain_name}*: {', '.join(unique_tools)}\n"
+
+            template_total = 0
+            template_with_code = 0
+            for tmpl in store.search(("templates",)):
+                template_total += 1
+                if store.get(("code",), tmpl.key):
+                    template_with_code += 1
+
+            component_total = 0
+            component_with_code = 0
+            for comp in store.search(("components",)):
+                component_total += 1
+                if store.get(("code",), comp.key):
+                    component_with_code += 1
+
+            if template_total or component_total:
+                tmpl_pct = (template_with_code / template_total * 100) if template_total else 0
+                comp_pct = (component_with_code / component_total * 100) if component_total else 0
+                suggestion_block += (
+                    "\n**Code Store Coverage:**\n"
+                    f"- Templates: {template_with_code}/{template_total} ({tmpl_pct:.1f}%)\n"
+                    f"- Components: {component_with_code}/{component_total} ({comp_pct:.1f}%)\n"
+                )
             
             context_blocks.append(suggestion_block)
         except Exception as e:
@@ -309,12 +163,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
     # ══════════════════════════════════════════════════════════════════════════
 
     # Low-value tokens that should not drive scoring on their own
-    ignore_words = {
-        'step', 'mapping', 'module', 'genes', 'denovo', 'assembly', 'tool',
-        'pipeline', 'workflow', 'build', 'create', 'make', 'run', 'using',
-        'file', 'data', 'reads', 'fastq', 'fasta', 'generate', 'process',
-        'custom', 'script', 'and', 'plus', 'with',
-    }
+    ignore_words = IGNORE_WORDS
 
     # ── Template Scan ──────────────────────────────────────────────────────
     try:
@@ -482,21 +331,9 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
     # ══════════════════════════════════════════════════════════════════════════
     try:
         # Strip conversational filler that dilutes the vector embedding
-        filler_pattern = (
-            r'\b(please|help|need|want|looking|build|design|create|make|'
-            r'pipeline|bioinformatic|bioinformatics|that|performs|does|can|you|'
-            r'would|like|could|should|also|just|really|actually|basically|'
-            r'i|me|my|give|write|develop|implement|set up|configure)\b'
-        )
-        dense_query = re.sub(filler_pattern, '', clean_query)
-        
-        # Inject expanded synonym tokens to anchor the embedding
-        expanded_terms = [w for w in query_tokens if w not in dense_query]
-        semantic_query = (dense_query + " " + " ".join(expanded_terms)).strip()
-        
-        # Fallback if stripping removed everything meaningful
-        if len(semantic_query.replace(" ", "")) < 3:
-            semantic_query = clean_query
+        semantic_query = build_semantic_query(clean_query, query_tokens)
+        if not semantic_query:
+            return "Semantic search skipped because the query was empty after normalization."
             
         docs_and_scores = data_loader.vector_store.similarity_search_with_score(semantic_query, k=settings.RAG_FAISS_K)
         

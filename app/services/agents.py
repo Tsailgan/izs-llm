@@ -2,12 +2,10 @@ import re
 import json
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.messages import RemoveMessage
 
 
 from app.models.ast_structure import NextflowPipelineAST
 from app.services.llm import get_llm
-from app.services.tools import retrieve_rag_context
 from app.services.graph_state import GraphState
 from app.services.renderer import render_mermaid_from_json, render_mermaid_from_ast
 from app.models.consultant_structure import ConsultantOutput
@@ -35,79 +33,217 @@ DIAGRAM_SYSTEM_PROMPT = load_diagram_prompt()
 # ==========================================
 
 def consultant_node(state: GraphState, store: BaseStore):
-    print("--- [NODE] CONSULTANT (Interactive Planner) ---")
+    """Phase 1: LLM reasons with tools bound. May produce tool_calls or a final text answer.
+    No bulk RAG injection — the LLM uses search_components to find what it needs."""
+    print("--- [NODE] CONSULTANT (Tool-Enhanced Planner) ---")
     llm = get_llm()
     
     current_messages = state.get("messages", [])
-    latest_query = state.get('user_query', '')
-    if current_messages:
-        latest_query = current_messages[-1].content
-
-    metadata_context = retrieve_rag_context(latest_query, store, embed_code=False)
-    print(f"[Consultant] RAG Context Retrieved: {len(metadata_context)} chars")
-    
-    # print("\n" + "═" * 60)
-    # print("                 RAG METADATA CONTEXT")
-    # print("═" * 60)
-    # print(metadata_context)
-    # print("═" * 60 + "\n")
 
     current_plan = state.get("design_plan", "No plan generated yet.")
     current_modules = state.get("selected_module_ids", [])
+    current_template = state.get("used_template_id", "None")
+    tool_memory = state.get("tool_memory", []) or []
+    
+    # Format structured tool memory as readable facts
+    formatted_facts = ""
+    if tool_memory:
+        fact_lines = []
+        for fact in tool_memory:
+            if isinstance(fact, dict):
+                tool_name = fact.get('tool', '?')
+                args = fact.get('args', '')
+                result = fact.get('result', '(no result)')
+                fact_lines.append(f"  - {tool_name}({args}) → {str(result)[:300]}")
+            else:
+                fact_lines.append(f"  - {fact}")
+        formatted_facts = "\n".join(fact_lines)
     
     revision_context = f"""
     # CURRENT PIPELINE STATE
     If you are making a revision, here is the current approved state of the pipeline:
     - Current Modules: {current_modules}
+    - Current Template: {current_template}
     - Current Plan: {current_plan}
+    
+    ## Previously Gathered Tool Facts (from earlier in this conversation):
+    {formatted_facts if formatted_facts else '(none yet)'}
     """
-    # --------------------------------
+
+    # Tool-usage instructions replace bulk RAG injection
+    tool_instructions = """
+    
+    # TOOLS AVAILABLE (USE THEM)
+    You have access to the following tools. You MUST use them to make accurate decisions:
+    
+     1. `search_components` — ALWAYS call this FIRST when the user describes a new analysis.
+         It searches the entire catalog (keyword + semantic) and returns available tools/templates.
+         If you see a `meta` or `warning` entry, ask for clarification before proceeding.
+       Example: search_components("illumina trimming quality control")
+    
+    2. `verify_component_id` — ALWAYS call this to verify EVERY component/template ID exists
+       before including it in your plan. This prevents hallucinated IDs.
+       Example: verify_component_id("step_1PP_trimming__fastp")
+    
+     3. `get_template_logic` — Call this to inspect a template's source code and logic flow.
+       Use it to decide if a template can be used as EXACT_MATCH or needs ADAPTED_MATCH.
+         If `code_available` is false, do not assume details; ask the user or suggest alternatives.
+       Example: get_template_logic("module_covid_emergency")
+    
+     4. `get_component_code` — Call this to read a component's source code.
+       Use it to understand HOW components connect (input/output channels) when planning data flow.
+         If `code_available` is false, do not assume details; ask the user or suggest alternatives.
+       Example: get_component_code("step_2AS_mapping__ivar")
+    
+    ## MANDATORY WORKFLOW
+    1. When the user describes what they need → call `search_components` to find matching tools
+    2. Review the search results and suggest options to the user
+    3. Before finalizing any plan → call `verify_component_id` for EACH ID you will include
+    4. If adapting a template → call `get_template_logic` to understand its structure
+    5. If you need to understand data connections → call `get_component_code`
+    
+     5. `check_channel_compatibility` — Call this to verify if two components can connect.
+       It parses actual Nextflow source code to check take/emit channel compatibility.
+       Example: check_channel_compatibility("step_1PP_trimming__fastp", "step_2AS_mapping__bowtie")
+    
+     6. `check_plan_logic` — Call this BEFORE finalizing any APPROVED plan.
+       It validates the full pipeline: checks all IDs exist, channels connect properly,
+       and template coverage is complete.
+       Example: check_plan_logic(["step_1PP_trimming__fastp", "step_2AS_mapping__bowtie"], "module_draft_genome")
+    
+    CRITICAL: Do NOT suggest component IDs from memory. ALWAYS search or verify first.
+    If tool results are empty or warnings appear, ask a clarifying question.
+    When you are done reasoning and have all information, produce your final response as plain text.
+    """
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", CONSULTANT_SYSTEM_PROMPT + "\n\nAVAILABLE RAG CONTEXT (Tools & Templates):\n{context}\n\n" + revision_context),
+        ("system", CONSULTANT_SYSTEM_PROMPT + "\n\n" + revision_context + tool_instructions),
         MessagesPlaceholder(variable_name="messages")
     ])
-
-    consultant_agent = llm.with_structured_output(ConsultantOutput)
-    chain = prompt | consultant_agent
-
+    
+    # Bind tools — lets the LLM choose to call tools during reasoning
+    from app.services.consultant_tools import CONSULTANT_TOOLS
+    llm_with_tools = llm.bind_tools(CONSULTANT_TOOLS)
+    
+    chain = prompt | llm_with_tools
+    
     try:
         result = chain.invoke({
-            "context": metadata_context,
             "messages": current_messages
         })
-        
-        print(f"[Consultant] Status: {result.status}")
+        # result is an AIMessage — may contain tool_calls or plain text
+        print(f"[Consultant] Tool calls: {len(result.tool_calls) if result.tool_calls else 0}")
+        return {"messages": [result]}
+    except Exception as e:
+        print(f"Consultant Node Failed: {str(e)}")
+        return {"messages": [AIMessage(content=f"I encountered an error while processing. Please try again.")], "error": str(e)}
 
+
+def consultant_extract_node(state: GraphState, store: BaseStore):
+    """Phase 2: After the tool loop completes, extract structured ConsultantOutput
+    from the consultant's final reasoning text."""
+    print("--- [NODE] CONSULTANT EXTRACT (Structured Output) ---")
+    llm = get_llm()
+    
+    messages = state.get("messages", [])
+    
+    # Find the last AI message with actual content (not tool calls)
+    last_ai_content = ""
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage) and msg.content and not getattr(msg, 'tool_calls', None):
+            last_ai_content = msg.content
+            break
+    
+    if not last_ai_content:
+        # Fallback: use last AI message even if it had tool calls
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage) and msg.content:
+                last_ai_content = msg.content
+                break
+    
+    if not last_ai_content:
+        return {
+            "messages": [AIMessage(content="I couldn't generate a response. Please try rephrasing your request.")],
+            "error": "No consultant response to extract from"
+        }
+
+    # Build context from the full conversation for the extractor
+    # Include tool results so the extractor can see verified IDs
+    # Use a wide window to capture full multi-tool-call turns
+    conversation_summary = []
+    tool_memory_new = []
+    for msg in messages[-40:]:  # Last 40 messages for context
+        if isinstance(msg, AIMessage):
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    conversation_summary.append(f"[TOOL CALL] {tc['name']}({tc['args']})")
+            if msg.content:
+                conversation_summary.append(f"[CONSULTANT] {msg.content}")
+        elif hasattr(msg, 'type') and msg.type == 'tool':
+            result_str = str(msg.content)[:500] if msg.content else "(empty)"
+            conversation_summary.append(f"[TOOL RESULT] {result_str}")
+            if msg.content:
+                # Build structured fact for tool_memory
+                tool_name = getattr(msg, 'name', 'unknown')
+                tool_memory_new.append({
+                    "tool": tool_name,
+                    "args": "(from conversation)",
+                    "result": str(msg.content)[:400]
+                })
+        elif isinstance(msg, HumanMessage):
+            conversation_summary.append(f"[USER] {msg.content}")
+    
+    context_text = "\n".join(conversation_summary)
+    
+    extraction_prompt = ChatPromptTemplate.from_messages([
+        ("system", 
+         "You are a structured data extractor. Based on the consultant's conversation below "
+         "(including tool calls and their results), extract the response into the required format.\n\n"
+         "RULES:\n"
+         "- Copy component IDs EXACTLY as they appear in tool verification results\n"
+         "- Only include IDs that were verified as valid by verify_component_id\n"
+         "- If the consultant is still chatting (asking questions, suggesting options), set status to CHATTING\n"
+         "- If the user approved the plan, set status to APPROVED and fill ALL fields\n"
+         "- The response_to_user should be the consultant's final message to the user\n"
+        ),
+        ("human", "CONVERSATION CONTEXT:\n{context}\n\nFINAL CONSULTANT MESSAGE:\n{reasoning}")
+    ])
+    
+    extractor = llm.with_structured_output(ConsultantOutput)
+    chain = extraction_prompt | extractor
+    
+    try:
+        result = chain.invoke({
+            "context": context_text,
+            "reasoning": last_ai_content
+        })
+        
+        print(f"[Consultant Extract] Status: {result.status}")
+
+        # Post-hoc verification safety net (kept as agreed)
         if result.status == "APPROVED":
-            
-            # 1. Verify Template ID against the Store
             if result.used_template_id:
                 tmpl_item = store.get(("templates",), result.used_template_id)
                 if not tmpl_item:
-                    print(f"⚠️ Consultant Hallucinated Template ID: '{result.used_template_id}'. Stripping from plan.")
+                    print(f"⚠️ [Safety Net] Hallucinated Template ID: '{result.used_template_id}'. Stripping.")
                     result.used_template_id = None
-                
-            # 2. Verify Component IDs against the Store
+            
             verified_modules = []
             for mod_id in result.selected_module_ids:
                 comp_item = store.get(("components",), mod_id)
                 if comp_item:
                     verified_modules.append(mod_id)
                 else:
-                    # Check if they accidentally put a template ID in the module list
                     tmpl_fallback = store.get(("templates",), mod_id)
                     if tmpl_fallback:
-                        pass 
+                        pass
                     else:
-                        print(f"⚠️ Consultant Hallucinated Module ID: '{mod_id}'. Stripping from plan.")
-            
+                        print(f"⚠️ [Safety Net] Hallucinated Module ID: '{mod_id}'. Stripping.")
             result.selected_module_ids = verified_modules
 
-        # Detect a "Hard Reset" from the LLM (user asked to start over completely)
+        # Detect a "Hard Reset" from the LLM
         is_hard_reset = (result.status == "CHATTING" and result.draft_plan == "" and len(result.selected_module_ids) == 0)
 
-        # Prepare the baseline state updates
         state_updates = {
             "messages": [AIMessage(content=result.response_to_user)],
             "consultant_status": result.status,
@@ -115,11 +251,11 @@ def consultant_node(state: GraphState, store: BaseStore):
             "strategy_selector": result.strategy_selector if result.status == "APPROVED" else state.get("strategy_selector", "CUSTOM_BUILD"),
             "used_template_id": result.used_template_id if (result.status == "APPROVED" or is_hard_reset) else state.get("used_template_id"),
             "selected_module_ids": result.selected_module_ids if (result.status == "APPROVED" or is_hard_reset) else state.get("selected_module_ids", []),
+            "tool_memory": (state.get("tool_memory", []) or []) + tool_memory_new[-10:],
             "error": None
         }
 
         # POST-GENERATION REVISION TRIGGER
-        # Wipe the old execution data so the frontend knows we are rebuilding or resetting
         if result.status == "CHATTING" or (result.status == "APPROVED" and state.get("nextflow_code")):
             state_updates["nextflow_code"] = None
             state_updates["mermaid_agent"] = None
@@ -129,8 +265,11 @@ def consultant_node(state: GraphState, store: BaseStore):
         return state_updates
         
     except Exception as e:
-        print(f"💥 Consultant Node Failed: {str(e)}")
-        return {"error": f"Consultant Agent Failed: {str(e)}"}
+        print(f"💥 Consultant Extract Failed: {str(e)}")
+        return {
+            "messages": [AIMessage(content="I encountered an error structuring the response. Please try again.")],
+            "error": f"Consultant Extract Failed: {str(e)}"
+        }
 
 
 def architect_node(state: GraphState):

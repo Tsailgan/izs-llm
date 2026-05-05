@@ -9,6 +9,8 @@ class GraphState(TypedDict):
     # --- Planner / Consultant State ---
     consultant_status: Optional[str]
     design_plan: Optional[str]
+    tool_memory: Optional[List[dict]]  # Structured: [{tool, args, result}, ...]
+    tool_call_count: int
     
     # --- Hydrator Routing State ---
     strategy_selector: Optional[str]      # e.g., EXACT_MATCH, ADAPTED_MATCH, CUSTOM_BUILD
