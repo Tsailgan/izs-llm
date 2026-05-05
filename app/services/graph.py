@@ -157,7 +157,12 @@ def build_consultant_subgraph():
             last_human_text = ""
             for m in reversed(messages):
                 if isinstance(m, HumanMessage):
-                    last_human_text = str(m.content).strip().lower()
+                    content = m.content
+                    if isinstance(content, list):
+                        last_human_text = " ".join([c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"])
+                    elif isinstance(content, str):
+                        last_human_text = content
+                    last_human_text = last_human_text.strip().lower()
                     break
             
             # Clean punctuation for matching
@@ -165,12 +170,14 @@ def build_consultant_subgraph():
             
             # Only cut off tool calling if it's an explicit "approved" and we already have a plan
             has_plan = bool(state.get("design_plan"))
-            is_approval = has_plan and (clean_human == "approved")
+            is_approval = has_plan and (clean_human == "approved" or clean_human == "approve")
+            
+            print(f"--- [NODE] GRAPH routing: last_human='{clean_human}', has_plan={has_plan}, is_approval={is_approval}")
             
             effective_limit = MAX_TOOL_ITERATIONS_APPROVAL if is_approval else MAX_TOOL_ITERATIONS
             
             if tool_msg_count >= effective_limit:
-                print(f"--- [NODE] GRAPH tool limit of {effective_limit} reached (approval={is_approval}, plan_exists={has_plan}, count={tool_msg_count}). forcing extraction")
+                print(f"--- [NODE] GRAPH tool limit of {effective_limit} reached (is_approval={is_approval}, count={tool_msg_count}). forcing extraction")
                 return "consultant_extract"
             return "tools"
         return "consultant_extract"

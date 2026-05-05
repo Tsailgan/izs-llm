@@ -289,16 +289,13 @@ def architect_reason_node(state: GraphState, store: BaseStore):
     llm_with_tools = llm.bind_tools(ARCHITECT_TOOLS)
     
     from langchain_core.messages import SystemMessage
-    system_template = """You are a Nextflow DSL2 code architect. You previously attempted to generate \
-a pipeline AST but validation failed. You now have tools to look up component \
-source code and verify channel connections.
+    system_template = """You are a Nextflow DSL2 code architect. You previously attempted to generate a pipeline AST but validation failed. You now have tools to look up component source code and verify channel connections.
 
 TOOLS:
 1. `lookup_component_code(component_id)` — Read a component's source code
 2. `verify_channel_connection(source_id, target_id)` — Check if two components can connect
 
-TASK: Use the tools to investigate the validation error below, then explain \
-what needs to be fixed. Be specific about channel names and connections.
+TASK: Use the tools to investigate the validation error below, then explain what needs to be fixed. Be specific about channel names and connections.
 
 VALIDATION ERROR:
 {validation_error}
@@ -306,22 +303,16 @@ VALIDATION ERROR:
 PLAN:
 {plan}"""
     
-    system_content = system_template.format(
-        validation_error=validation_error,
-        plan=plan
-    )
+    system_content = system_template.replace("{validation_error}", str(validation_error)).replace("{plan}", str(plan))
     
-    system_msg = SystemMessage(content=system_content)
-    
-    prompt = ChatPromptTemplate.from_messages([
-        system_msg,
-        ("human", "Investigate the error using your tools. What components are involved and how should they connect?")
-    ])
-    
-    chain = prompt | llm_with_tools
+    from langchain_core.messages import SystemMessage, HumanMessage
+    messages = [
+        SystemMessage(content=system_content),
+        HumanMessage(content="Investigate the error using your tools. What components are involved and how should they connect?")
+    ]
     
     try:
-        result = chain.invoke({})
+        result = llm_with_tools.invoke(messages)
         print(f"--- [NODE] ARCHITECT REASON tool calls: {len(result.tool_calls) if result.tool_calls else 0}")
         return {"messages": [result]}
     except Exception as e:
