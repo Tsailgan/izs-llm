@@ -629,3 +629,100 @@ def hydrator_node(state: GraphState, store: BaseStore):
     # print(f"technical_context: {full_context}")
 
     return {"technical_context": full_context}
+
+
+def architect_precheck_node(state: GraphState, store: BaseStore):
+    """Deterministic pre-check: verify channel connections and detect common
+    issues between planned components BEFORE the architect generates code.
+    """
+    print("--- [NODE] ARCHITECT PRECHECK deterministic validation ---")
+    if state.get("error"):
+        return {"error": state["error"]}
+
+    module_ids = state.get("selected_module_ids", [])
+    strategy = state.get("strategy_selector", "CUSTOM_BUILD")
+
+    # Skip for EXACT_MATCH or trivially small pipelines
+    if strategy == "EXACT_MATCH" or len(module_ids) < 2:
+        print("--- [NODE] ARCHITECT PRECHECK skipped (EXACT_MATCH or <2 components)")
+        return {}
+
+    from app.services.consultant_tools import _parse_nextflow_channels
+    from app.models.ast_structure import _is_void_tool
+
+    warnings = []
+
+    # ── Check 1: Channel compatibility between consecutive steps ──
+    for i in range(len(module_ids) - 1):
+        src_id = module_ids[i]
+        tgt_id = module_ids[i + 1]
+
+        # Parse source code channels
+        src_code_item = store.get(("code",), src_id)
+        tgt_code_item = store.get(("code",), tgt_id)
+
+        src_code = src_code_item.value.get("content", "") if src_code_item else ""
+        tgt_code = tgt_code_item.value.get("content", "") if tgt_code_item else ""
+
+        src_parsed = _parse_nextflow_channels(src_code)
+        tgt_parsed = _parse_nextflow_channels(tgt_code)
+
+        # Fallback to catalog metadata
+        if not src_parsed["emits"]:
+            meta = store.get(("components",), src_id) or store.get(("templates",), src_id)
+            if meta:
+                src_parsed["emits"] = meta.value.get("output_channels", meta.value.get("out", []))
+        if not tgt_parsed["takes"]:
+            meta = store.get(("components",), tgt_id) or store.get(("templates",), tgt_id)
+            if meta:
+                tgt_parsed["takes"] = meta.value.get("input_channels", meta.value.get("input_types", []))
+
+        src_lower = {ch.lower() for ch in src_parsed["emits"]}
+        tgt_lower = {ch.lower() for ch in tgt_parsed["takes"]}
+
+        if src_lower and tgt_lower and not (src_lower & tgt_lower) and len(tgt_parsed["takes"]) != 1:
+            warnings.append(
+                f"MISMATCH {src_id} → {tgt_id}: emits {list(src_lower)}, takes {list(tgt_lower)}. Use .map or rename to adapt."
+            )
+
+    # ── Check 2: Void tool detection ──
+    void_tools = [mid for mid in module_ids if _is_void_tool(mid)]
+    if void_tools:
+        warnings.append(f"VOID TOOLS (no output): {void_tools}. Call directly, no assignment, no emit.")
+
+    # ── Check 3: Missing source code ──
+    missing_code = [mid for mid in module_ids if not store.get(("code",), mid)]
+    if missing_code:
+        warnings.append(f"NO SOURCE CODE: {missing_code}. Rely on catalog metadata for channel names.")
+
+    # ── Check 4: Per-component channel summary ──
+    channel_map_lines = []
+    for mid in module_ids:
+        code_item = store.get(("code",), mid)
+        code = code_item.value.get("content", "") if code_item else ""
+        parsed = _parse_nextflow_channels(code)
+        
+        if not parsed["takes"]:
+            meta = store.get(("components",), mid) or store.get(("templates",), mid)
+            if meta:
+                parsed["takes"] = meta.value.get("input_channels", meta.value.get("input_types", []))
+        if not parsed["emits"]:
+            meta = store.get(("components",), mid) or store.get(("templates",), mid)
+            if meta:
+                parsed["emits"] = meta.value.get("output_channels", meta.value.get("out", []))
+
+        e = "VOID" if _is_void_tool(mid) else ", ".join(parsed["emits"]) or "unknown"
+        t = ", ".join(parsed["takes"]) or "unknown"
+        channel_map_lines.append(f"- {mid}: take=[{t}] emit=[{e}]")
+
+    if warnings or channel_map_lines:
+        precheck_block = "\n## CHANNEL MAP (verified from code store)\n"
+        precheck_block += "\n".join(channel_map_lines)
+        if warnings:
+            precheck_block += "\n## WARNINGS\n" + "\n".join(warnings)
+
+        print(f"--- [NODE] ARCHITECT PRECHECK {len(warnings)} warnings, {len(module_ids)} components")
+        return {"technical_context": state.get("technical_context", "") + "\n\n" + precheck_block}
+
+    print("--- [NODE] ARCHITECT PRECHECK all clear")
+    return {}

@@ -5,7 +5,7 @@ from langgraph.prebuilt import ToolNode
 from langchain_core.messages import RemoveMessage, SystemMessage, AIMessage, HumanMessage, ToolMessage as LCToolMessage
 
 from app.services.graph_state import GraphState
-from app.services.agents import consultant_node, consultant_extract_node, hydrator_node, architect_reason_node, architect_generate_node, diagram_node, deterministic_diagram_node
+from app.services.agents import consultant_node, consultant_extract_node, hydrator_node, architect_precheck_node, architect_reason_node, architect_generate_node, diagram_node, deterministic_diagram_node
 from app.services.repair import repair_node, should_repair
 from app.services.renderer import renderer_node
 from app.services.consultant_tools import CONSULTANT_TOOLS
@@ -235,6 +235,7 @@ def build_consultant_subgraph():
 def build_execution_subgraph():
     sub = StateGraph(GraphState)
     sub.add_node("hydrator", hydrator_node)
+    sub.add_node("architect_precheck", architect_precheck_node)
     sub.add_node("architect_reason", architect_reason_node)
     sub.add_node("architect_tools", ToolNode(ARCHITECT_TOOLS, handle_tool_errors=True))
     sub.add_node("architect_generate", architect_generate_node)
@@ -247,7 +248,8 @@ def build_execution_subgraph():
     MAX_ARCHITECT_TOOL_ITERATIONS = 2
     
     sub.set_entry_point("hydrator")
-    sub.add_edge("hydrator", "architect_generate")  # First attempt: straight to generation
+    sub.add_edge("hydrator", "architect_precheck")  # Deterministic channel/void check
+    sub.add_edge("architect_precheck", "architect_generate")  # Then generate
     
     # Architect generate → check if valid
     sub.add_conditional_edges(
