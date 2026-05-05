@@ -101,7 +101,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
 
     # ── Keyword: Template Scan ──
     try:
-        for tmpl in store.search(("templates",)):
+        for tmpl in store.search(("templates",), limit=100):
             tmpl_id = tmpl.key.lower()
             tmpl_data = tmpl.value
             score = 0
@@ -134,7 +134,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
     # ── Keyword: Component Scan ──
     try:
         component_scores = {}
-        for comp in store.search(("components",)):
+        for comp in store.search(("components",), limit=100):
             comp_id = comp.key.lower()
             comp_data = comp.value
             score = 0

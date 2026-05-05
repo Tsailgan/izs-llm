@@ -109,7 +109,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
             suggestion_block += "The user's query implies they want to know what is available. Use this capabilities map.\n\n"
             suggestion_block += "**Available Pipelines (Templates):**\n"
             
-            for tmpl in store.search(("templates",)):
+            for tmpl in store.search(("templates",), limit=100):
                 t_data = tmpl.value
                 t_name = t_data.get('id', tmpl.key)
                 outputs = t_data.get('output_channels', [])
@@ -117,7 +117,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                 suggestion_block += f"- **{t_name}**{out_str}\n"
             
             domain_groups = defaultdict(list)
-            for comp in store.search(("components",)):
+            for comp in store.search(("components",), limit=100):
                 c_data = comp.value
                 tool_name = c_data.get("tool")
                 domain = c_data.get("domain", "Other")
@@ -133,14 +133,14 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
 
             template_total = 0
             template_with_code = 0
-            for tmpl in store.search(("templates",)):
+            for tmpl in store.search(("templates",), limit=100):
                 template_total += 1
                 if store.get(("code",), tmpl.key):
                     template_with_code += 1
 
             component_total = 0
             component_with_code = 0
-            for comp in store.search(("components",)):
+            for comp in store.search(("components",), limit=100):
                 component_total += 1
                 if store.get(("code",), comp.key):
                     component_with_code += 1
@@ -168,7 +168,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
     # ── Template Scan ──────────────────────────────────────────────────────
     try:
         template_scores = {}
-        for tmpl in store.search(("templates",)):
+        for tmpl in store.search(("templates",), limit=100):
             tmpl_id = tmpl.key.lower()
             tmpl_data = tmpl.value
             score = 0
@@ -204,7 +204,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
     # ── Component Scan ─────────────────────────────────────────────────────
     try:
         component_scores = {}
-        for comp in store.search(("components",)):
+        for comp in store.search(("components",), limit=100):
             comp_id = comp.key.lower()
             comp_data = comp.value
             score = 0
