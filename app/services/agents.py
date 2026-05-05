@@ -289,13 +289,21 @@ def architect_reason_node(state: GraphState, store: BaseStore):
     llm_with_tools = llm.bind_tools(ARCHITECT_TOOLS)
     
     from langchain_core.messages import SystemMessage
-    system_template = """You are a Nextflow DSL2 code architect. You previously attempted to generate a pipeline AST but validation failed. You now have tools to look up component source code and verify channel connections.
+    system_template = """You are a Nextflow DSL2 code architect. You previously attempted to generate a pipeline AST but validation failed. You now have tools to investigate and fix the issue.
 
 TOOLS:
-1. `lookup_component_code(component_id)` — Read a component's source code
+1. `lookup_component_code(component_id)` — Read a component's source code to check take/emit channels
 2. `verify_channel_connection(source_id, target_id)` — Check if two components can connect
+3. `validate_body_code(code_snippet, workflow_name)` — Validate a body_code snippet for DSL2 errors
 
-TASK: Use the tools to investigate the validation error below, then explain what needs to be fixed. Be specific about channel names and connections.
+CRITICAL DSL2 RULES (common mistakes):
+- body_code must NOT contain 'workflow name {{}}', 'take:', 'main:', or 'emit:' keywords — the rendering template handles these automatically
+- Sub-workflows must NOT call getSingleInput(), getReference(), etc. — these go in the entrypoint only, data is passed via take_channels
+- Void tools (pangolin, prokka, abricate, etc.) must NOT be assigned to variables — call them directly
+- The entrypoint workflow calls sub-workflows: reads = getSingleInput(); module_name(reads)
+- The sub-workflow receives data via take_channels, processes it, and emits results via emit_channels
+
+TASK: Investigate the validation error below. Use your tools to check the specific components involved. Explain what needs to be fixed.
 
 VALIDATION ERROR:
 {validation_error}
