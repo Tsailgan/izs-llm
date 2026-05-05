@@ -5,13 +5,22 @@ from langgraph.prebuilt import ToolNode
 from langchain_core.messages import RemoveMessage, SystemMessage, AIMessage, HumanMessage, ToolMessage as LCToolMessage
 
 from app.services.graph_state import GraphState
-from app.services.agents import consultant_node, consultant_extract_node, hydrator_node, architect_node, diagram_node, deterministic_diagram_node
+from app.services.agents import consultant_node, consultant_extract_node, hydrator_node, architect_reason_node, architect_generate_node, diagram_node, deterministic_diagram_node
 from app.services.repair import repair_node, should_repair
 from app.services.renderer import renderer_node
 from app.services.consultant_tools import CONSULTANT_TOOLS
+from app.services.architect_tools import ARCHITECT_TOOLS
 
 # Safety cap on tool-calling iterations to prevent runaway loops
 MAX_TOOL_ITERATIONS = 5
+MAX_TOOL_ITERATIONS_APPROVAL = 2  # Tighter limit when user already approved
+
+# Approval keywords — if the user's message matches, limit tool calls
+APPROVAL_PATTERNS = {
+    "yes", "approve", "approved", "go ahead", "looks good", "confirm",
+    "ok", "okay", "perfect", "do it", "proceed", "ship it", "lgtm",
+    "si", "sì", "va bene", "confermo",
+}
 
 # Memory compaction settings
 MEMORY_KEEP_LAST_N = 40      # Keep the last N messages without compaction
@@ -136,10 +145,31 @@ def build_consultant_subgraph():
             return "consultant_extract"
         last_msg = messages[-1]
         if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-            # Safety: count tool messages to prevent infinite loops
-            tool_msg_count = sum(1 for m in messages if isinstance(m, LCToolMessage))
-            if tool_msg_count >= MAX_TOOL_ITERATIONS:
-                print(f"--- [NODE] GRAPH ERROR tool limit of {MAX_TOOL_ITERATIONS} reached. forcing extraction")
+            # Count tool messages only since the last HumanMessage (per-turn reset)
+            tool_msg_count = 0
+            for m in reversed(messages):
+                if isinstance(m, HumanMessage):
+                    break  # Hit the current turn boundary — stop counting
+                if isinstance(m, LCToolMessage):
+                    tool_msg_count += 1
+            
+            # Detect if the user's last message is an approval → use tighter limit
+            last_human_text = ""
+            for m in reversed(messages):
+                if isinstance(m, HumanMessage):
+                    last_human_text = str(m.content).strip().lower()
+                    break
+            
+            # Clean punctuation for matching
+            clean_human = last_human_text.rstrip("!.,;:?")
+            is_approval = clean_human in APPROVAL_PATTERNS or any(
+                p in last_human_text for p in ("approve", "go ahead", "looks good", "proceed", "confermo")
+            )
+            
+            effective_limit = MAX_TOOL_ITERATIONS_APPROVAL if is_approval else MAX_TOOL_ITERATIONS
+            
+            if tool_msg_count >= effective_limit:
+                print(f"--- [NODE] GRAPH tool limit of {effective_limit} reached (approval={is_approval}, count={tool_msg_count}). forcing extraction")
                 return "consultant_extract"
             return "tools"
         return "consultant_extract"
@@ -162,17 +192,23 @@ def build_consultant_subgraph():
 def build_execution_subgraph():
     sub = StateGraph(GraphState)
     sub.add_node("hydrator", hydrator_node)
-    sub.add_node("architect", architect_node)
+    sub.add_node("architect_reason", architect_reason_node)
+    sub.add_node("architect_tools", ToolNode(ARCHITECT_TOOLS, handle_tool_errors=True))
+    sub.add_node("architect_generate", architect_generate_node)
     sub.add_node("repair", repair_node)
     sub.add_node("renderer", renderer_node)
     sub.add_node("diagram", diagram_node)
     sub.add_node("deterministic_diagram", deterministic_diagram_node)
     
-    sub.set_entry_point("hydrator")
-    sub.add_edge("hydrator", "architect")
+    # Max tool iterations for architect reasoning
+    MAX_ARCHITECT_TOOL_ITERATIONS = 2
     
+    sub.set_entry_point("hydrator")
+    sub.add_edge("hydrator", "architect_generate")  # First attempt: straight to generation
+    
+    # Architect generate → check if valid
     sub.add_conditional_edges(
-        "architect",
+        "architect_generate",
         should_repair,
         {
             "success": "renderer",
@@ -181,7 +217,36 @@ def build_execution_subgraph():
         }
     )
     
-    sub.add_edge("repair", "architect")
+    # Repair → architect_reason (on retry, investigate with tools first)
+    sub.add_edge("repair", "architect_reason")
+    
+    # Architect reason routing: tool calls → tools loop, else → generate
+    def route_architect_reason(state: GraphState):
+        messages = state.get("messages", [])
+        if not messages:
+            return "architect_generate"
+        last_msg = messages[-1]
+        if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+            # Count architect tool messages (since last repair/human message)
+            arch_tool_count = 0
+            for m in reversed(messages):
+                if isinstance(m, HumanMessage):
+                    break
+                if isinstance(m, LCToolMessage):
+                    arch_tool_count += 1
+            if arch_tool_count >= MAX_ARCHITECT_TOOL_ITERATIONS:
+                print(f"--- [NODE] GRAPH architect tool limit reached ({arch_tool_count}). proceeding to generate")
+                return "architect_generate"
+            return "architect_tools"
+        return "architect_generate"
+    
+    sub.add_conditional_edges("architect_reason", route_architect_reason, {
+        "architect_tools": "architect_tools",
+        "architect_generate": "architect_generate"
+    })
+    
+    # After architect tools, loop back to architect reason
+    sub.add_edge("architect_tools", "architect_reason")
     sub.add_conditional_edges(
         "renderer",
         check_diagram_generation,

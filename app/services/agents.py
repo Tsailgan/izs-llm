@@ -272,25 +272,88 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
         }
 
 
-def architect_node(state: GraphState):
+def architect_reason_node(state: GraphState, store: BaseStore):
+    """Architect reasoning phase — uses tools to verify code logic before generating.
+    Only activated on retries so the architect can understand WHY it failed.
+    On first attempt this is skipped (straight to generate)."""
+    print("--- [NODE] ARCHITECT REASON tool-assisted verification ---")
+    if state.get("error"): return {"error": state['error']}
+    
+    llm = get_llm()
+    
+    validation_error = state.get("validation_error", "")
+    plan = state.get('design_plan', 'No plan provided.')
+    tech_context = state.get('technical_context', 'No context provided.')
+    
+    from app.services.architect_tools import ARCHITECT_TOOLS
+    llm_with_tools = llm.bind_tools(ARCHITECT_TOOLS)
+    
+    from langchain_core.messages import SystemMessage
+    system_msg = SystemMessage(content=(
+        "You are a Nextflow DSL2 code architect. You previously attempted to generate "
+        "a pipeline AST but validation failed. You now have tools to look up component "
+        "source code and verify channel connections.\n\n"
+        "TOOLS:\n"
+        "1. `lookup_component_code(component_id)` — Read a component's source code\n"
+        "2. `verify_channel_connection(source_id, target_id)` — Check if two components can connect\n\n"
+        "TASK: Use the tools to investigate the validation error below, then explain "
+        "what needs to be fixed. Be specific about channel names and connections.\n\n"
+        f"VALIDATION ERROR:\n{validation_error}\n\n"
+        f"PLAN:\n{plan}"
+    ))
+    
+    prompt = ChatPromptTemplate.from_messages([
+        system_msg,
+        ("human", "Investigate the error using your tools. What components are involved and how should they connect?")
+    ])
+    
+    chain = prompt | llm_with_tools
+    
+    try:
+        result = chain.invoke({})
+        print(f"--- [NODE] ARCHITECT REASON tool calls: {len(result.tool_calls) if result.tool_calls else 0}")
+        return {"messages": [result]}
+    except Exception as e:
+        print(f"--- [NODE] ARCHITECT REASON ERROR: {str(e)}")
+        return {}
+
+
+def architect_generate_node(state: GraphState):
+    """Architect generation phase — produces the structured AST.
+    This is the same as the original architect_node but can benefit from
+    reasoning context gathered in architect_reason_node."""
     print("--- [NODE] ARCHITECT hybrid code generator ---")
     if state.get("error"): return {"error": state['error']}
     
     llm = get_llm()
     architect_agent = llm.with_structured_output(NextflowPipelineAST, method="json_schema", include_raw=False)
 
+    # If we had a reasoning phase, extract the findings
+    architect_findings = ""
+    messages = state.get("messages", [])
+    for msg in reversed(messages[-10:]):
+        if isinstance(msg, AIMessage) and msg.content and not getattr(msg, 'tool_calls', None):
+            # Check if this looks like architect reasoning (not consultant output)
+            if any(kw in msg.content.lower() for kw in ("channel", "emit", "take", "connection", "validation")):
+                architect_findings = msg.content
+                break
+    
+    plan_text = state.get('design_plan', 'No plan provided.')
+    tech_context = state.get('technical_context', 'No context provided.')
+    
+    human_msg = f"APPROVED PLAN:\n{plan_text}\n\nTECHNICAL CONTEXT (Available Tools & Code):\n{tech_context}"
+    if architect_findings:
+        human_msg += f"\n\nPREVIOUS ATTEMPT ANALYSIS (fix these issues):\n{architect_findings}"
+    
     prompt = ChatPromptTemplate.from_messages([
         ("system", ARCHITECT_SYSTEM_PROMPT),
-        ("human", "APPROVED PLAN:\n{plan}\n\nTECHNICAL CONTEXT (Available Tools & Code):\n{tech_context}")
+        ("human", human_msg)
     ])
         
-    messages = prompt.invoke({
-        "plan": state.get('design_plan', 'No plan provided.'),
-        "tech_context": state.get('technical_context', 'No context provided.')
-    }).to_messages()
+    gen_messages = prompt.invoke({}).to_messages()
 
     try:
-        result = architect_agent.invoke(messages)
+        result = architect_agent.invoke(gen_messages)
         print("--- [NODE] ARCHITECT successfully generated hybrid ast")
         return {
             "ast_json": result.model_dump(),
