@@ -115,8 +115,10 @@ def consultant_node(state: GraphState, store: BaseStore):
     When you are done reasoning and have all information, produce your final response as plain text.
     """
 
+    from langchain_core.messages import SystemMessage
+    system_msg = SystemMessage(content=CONSULTANT_SYSTEM_PROMPT + "\n\n" + revision_context + tool_instructions)
     prompt = ChatPromptTemplate.from_messages([
-        ("system", CONSULTANT_SYSTEM_PROMPT + "\n\n" + revision_context + tool_instructions),
+        system_msg,
         MessagesPlaceholder(variable_name="messages")
     ])
     
