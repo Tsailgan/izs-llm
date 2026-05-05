@@ -18,7 +18,7 @@ from langgraph.store.base import BaseStore
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _inject_component(comp_id, found_ids, context_blocks, store: BaseStore, embed_code=True):
-    """Injects a single component block (metadata + optional source code) into context."""
+    """we put a component block in the context. it has metadata and maybe the source code too."""
     if comp_id in found_ids:
         return
     
@@ -48,7 +48,7 @@ OUTPUTS: {', '.join(comp_data.get('output_channels', comp_data.get('out', [])))}
     context_blocks.append(block)
 
 def _inject_template(template_id, found_ids, context_blocks, store: BaseStore, embed_code=True):
-    """Injects a single template block (metadata + optional source code) into context."""
+    """we put a template block in the context. it has metadata and maybe the source code too."""
     if template_id in found_ids:
         return
     
@@ -156,7 +156,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
             
             context_blocks.append(suggestion_block)
         except Exception as e:
-            print(f"Catalog suggestion error: {e}")
+            print(f"--- [NODE] TOOL ERROR catalog suggestion error: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # STAGE 2 — HYBRID KEYWORD & METADATA SEARCH
@@ -199,7 +199,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                 for step_id in tmpl_data.get('steps_used', []):
                     _inject_component(step_id, found_ids, context_blocks, store, embed_code)
     except Exception as e:
-        print(f"Template search error: {e}")
+        print(f"--- [NODE] TOOL ERROR template search error: {e}")
 
     # ── Component Scan ─────────────────────────────────────────────────────
     try:
@@ -270,7 +270,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                     _inject_component(comp_key, found_ids, context_blocks, store, embed_code)
             
     except Exception as e:
-        print(f"Component search error: {e}")
+        print(f"--- [NODE] TOOL ERROR component search error: {e}")
 
     # ── Resource (Helper Function) Scan ────────────────────────────────────
     try:
@@ -305,7 +305,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                     )
                     found_ids.add(helper.get('name'))
     except Exception as e:
-        print(f"Resource search error: {e}")
+        print(f"--- [NODE] TOOL ERROR resource search error: {e}")
 
     # ── Container Scan ─────────────────────────────────────────────────────
     try:
@@ -324,7 +324,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                     container_block += f"- **{c.get('name')}**: `{c.get('url')}`\n"
                 context_blocks.append(container_block)
     except Exception as e:
-        print(f"Container search error: {e}")
+        print(f"--- [NODE] TOOL ERROR container search error: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # STAGE 3 — SEMANTIC SEARCH (FAISS)
@@ -367,7 +367,7 @@ def retrieve_rag_context(user_query, store: BaseStore, embed_code=False):
                     _inject_component(item_id, found_ids, context_blocks, store, embed_code)
 
     except Exception as e:
-        print(f"FAISS search error: {e}")
+        print(f"--- [NODE] TOOL ERROR faiss search error: {e}")
 
     final_context = "\n".join(context_blocks) + "\n\n"
     return final_context

@@ -11,11 +11,11 @@ def get_llm():
     api_key = os.environ.get("MISTRAL_API_KEY", "").strip()
     
     if not api_key:
-        print("❌ CRITICAL ERROR: MISTRAL_API_KEY is missing from environment variables!")
+        print("--- [NODE] LLM ERROR mistral api key is missing")
         raise ValueError("MISTRAL_API_KEY is not set.")
     
     # Debug: verify key length without exposing the key
-    print(f"[LLM] Initializing Mistral with key length: {len(api_key)}")
+    print(f"--- [NODE] LLM initializing mistral with key length {len(api_key)}")
     
     return ChatMistralAI(
         model=settings.LLM_MODEL,
@@ -40,9 +40,9 @@ def get_judge_llm(temperature=0.0):
 
 def rate_limit_pause(seconds=20):
     """Manually pause execution to respect Groq's strict free-tier rate limits."""
-    print(f"\n⏳ [Rate Limit Protection] Pausing for {seconds} seconds to let Groq reset...")
+    print(f"\\n--- [NODE] LLM pausing for {seconds} seconds so groq can reset")
     time.sleep(seconds)
-    print("▶️ Resuming...")
+    print("--- [NODE] LLM resuming now")
 
 def with_rate_limit_retry(max_attempts=3, delay_seconds=25):
     """
@@ -60,11 +60,11 @@ def with_rate_limit_retry(max_attempts=3, delay_seconds=25):
                     error_str = str(e).lower()
                     if "429" in error_str or "rate limit" in error_str:
                         attempts += 1
-                        print(f"\n⚠️ Hit Groq rate limit. Attempt {attempts} of {max_attempts}.")
+                        print(f"\\n--- [NODE] LLM ERROR hit groq rate limit. this is try {attempts} out of {max_attempts}")
                         if attempts < max_attempts:
                             rate_limit_pause(delay_seconds)
                         else:
-                            print("❌ Max rate limit retries reached. Failing test.")
+                            print("--- [NODE] LLM ERROR max retries reached. we fail now")
                             raise e
                     else:
                         raise e

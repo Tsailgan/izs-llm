@@ -33,9 +33,8 @@ DIAGRAM_SYSTEM_PROMPT = load_diagram_prompt()
 # ==========================================
 
 def consultant_node(state: GraphState, store: BaseStore):
-    """Phase 1: LLM reasons with tools bound. May produce tool_calls or a final text answer.
-    No bulk RAG injection — the LLM uses search_components to find what it needs."""
-    print("--- [NODE] CONSULTANT (Tool-Enhanced Planner) ---")
+    """Phase 1. the llm thinks with tools to help. it might use tools or just give a text answer. we do not just inject all the rag context. the llm uses search tools to find what it needs."""
+    print("--- [NODE] CONSULTANT tool-enhanced planner ---")
     llm = get_llm()
     
     current_messages = state.get("messages", [])
@@ -131,18 +130,17 @@ def consultant_node(state: GraphState, store: BaseStore):
         result = chain.invoke({
             "messages": current_messages
         })
-        # result is an AIMessage — may contain tool_calls or plain text
-        print(f"[Consultant] Tool calls: {len(result.tool_calls) if result.tool_calls else 0}")
+        # the result is an aimessage that might have tool calls or just text
+        print(f"--- [NODE] CONSULTANT tool calls: {len(result.tool_calls) if result.tool_calls else 0}")
         return {"messages": [result]}
     except Exception as e:
-        print(f"Consultant Node Failed: {str(e)}")
+        print(f"--- [NODE] CONSULTANT ERROR consultant node failed: {str(e)}")
         return {"messages": [AIMessage(content=f"I encountered an error while processing. Please try again.")], "error": str(e)}
 
 
 def consultant_extract_node(state: GraphState, store: BaseStore):
-    """Phase 2: After the tool loop completes, extract structured ConsultantOutput
-    from the consultant's final reasoning text."""
-    print("--- [NODE] CONSULTANT EXTRACT (Structured Output) ---")
+    """Phase 2. after the tool loop is done we pull out the structured output from the consultant final text."""
+    print("--- [NODE] CONSULTANT EXTRACT structured output ---")
     llm = get_llm()
     
     messages = state.get("messages", [])
@@ -218,14 +216,14 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
             "reasoning": last_ai_content
         })
         
-        print(f"[Consultant Extract] Status: {result.status}")
+        print(f"--- [NODE] CONSULTANT EXTRACT status is {result.status}")
 
-        # Post-hoc verification safety net (kept as agreed)
+        # we check the results just in case to be safe
         if result.status == "APPROVED":
             if result.used_template_id:
                 tmpl_item = store.get(("templates",), result.used_template_id)
                 if not tmpl_item:
-                    print(f"⚠️ [Safety Net] Hallucinated Template ID: '{result.used_template_id}'. Stripping.")
+                    print(f"--- [NODE] CONSULTANT EXTRACT ERROR hallucinated template id {result.used_template_id}. stripping it")
                     result.used_template_id = None
             
             verified_modules = []
@@ -238,7 +236,7 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
                     if tmpl_fallback:
                         pass
                     else:
-                        print(f"⚠️ [Safety Net] Hallucinated Module ID: '{mod_id}'. Stripping.")
+                        print(f"--- [NODE] CONSULTANT EXTRACT ERROR hallucinated module id {mod_id}. stripping it")
             result.selected_module_ids = verified_modules
 
         # Detect a "Hard Reset" from the LLM
@@ -265,7 +263,7 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
         return state_updates
         
     except Exception as e:
-        print(f"💥 Consultant Extract Failed: {str(e)}")
+        print(f"--- [NODE] CONSULTANT EXTRACT ERROR extract failed: {str(e)}")
         return {
             "messages": [AIMessage(content="I encountered an error structuring the response. Please try again.")],
             "error": f"Consultant Extract Failed: {str(e)}"
@@ -273,7 +271,7 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
 
 
 def architect_node(state: GraphState):
-    print("--- [NODE] ARCHITECT (Hybrid Code Generator) ---")
+    print("--- [NODE] ARCHITECT hybrid code generator ---")
     if state.get("error"): return {"error": state['error']}
     
     llm = get_llm()
@@ -291,13 +289,13 @@ def architect_node(state: GraphState):
 
     try:
         result = architect_agent.invoke(messages)
-        print("[Architect] Successfully generated Hybrid AST.")
+        print("--- [NODE] ARCHITECT successfully generated hybrid ast")
         return {
             "ast_json": result.model_dump(),
             "validation_error": None
         }
     except Exception as e:
-        print(f"⚠️ Architect Validation Failed: {str(e)}")
+        print(f"--- [NODE] ARCHITECT ERROR validation failed: {str(e)}")
         
         raw_ast = {}
         # Attempt best-effort extraction from OutputParserException or ValidationError
@@ -320,12 +318,12 @@ def architect_node(state: GraphState):
     
 
 def diagram_node(state: GraphState):
-    print("--- [NODE] DIAGRAM AGENT (JSON -> Python Compiler) ---")
+    print("--- [NODE] DIAGRAM AGENT json to python compiler ---")
     if state.get("error"): return {"error": state['error']}
     
     final_code = state.get("nextflow_code", "")
     if not final_code:
-        print("[Diagram] Warning: No Nextflow code found.")
+        print("--- [NODE] DIAGRAM AGENT warning no nextflow code found")
         return {"mermaid_agent": "flowchart TD\n    Empty[No code generated]"}
 
     llm = get_llm()
@@ -348,13 +346,13 @@ def diagram_node(state: GraphState):
 
             mermaid_string = render_mermaid_from_json(result)
             
-            print(f"[Diagram] Successfully compiled Mermaid graph on attempt {attempt + 1}.")
+            print(f"--- [NODE] DIAGRAM AGENT successfully compiled mermaid graph on attempt {attempt + 1}")
             return {
                 "mermaid_agent": mermaid_string
             }
             
         except Exception as e:
-            print(f"⚠️ Diagram Data Error (Attempt {attempt + 1}): {str(e)}")
+            print(f"--- [NODE] DIAGRAM AGENT ERROR diagram data error on attempt {attempt + 1}: {str(e)}")
             messages.append(AIMessage(content="I generated an invalid JSON graph structure."))
             messages.append(HumanMessage(content=f"Validation Error: {str(e)}\nFix the data and try again."))
     
@@ -362,23 +360,23 @@ def diagram_node(state: GraphState):
     return {"mermaid_agent": "flowchart TD\n    Error[\"Agentic diagram generation failed after 3 attempts.\"]"}
     
 def deterministic_diagram_node(state: GraphState):
-    print("--- [NODE] DIAGRAM (Deterministic AST -> Mermaid) ---")
+    print("--- [NODE] DIAGRAM deterministic ast to mermaid ---")
     if state.get("error"): return {"error": state['error']}
 
     ast_json = state.get("ast_json", {})
     if not ast_json:
-        print("[Diagram] Warning: No AST found.")
+        print("--- [NODE] DIAGRAM warning no ast found")
         return {"mermaid_deterministic": "flowchart TD\n    Empty[No AST generated]"}
 
     try:
         mermaid_string = render_mermaid_from_ast(ast_json)
-        print(f"[Diagram] Mermaid generated from AST ({len(mermaid_string)} chars)")
+        print(f"--- [NODE] DIAGRAM mermaid generated from ast with length {len(mermaid_string)}")
         return {
             "mermaid_deterministic": mermaid_string
         }
     except Exception as e:
-        print(f"[Diagram] Error: {e}")
-        # Even if deterministic fails (unlikely), we only set mermaid_deterministic error
+        print(f"--- [NODE] DIAGRAM ERROR error is {e}")
+        # we only set the error for the deterministic diagram if it fails
         return {"mermaid_deterministic": f'flowchart TD\n    Error["Deterministic diagram error: {str(e)[:100]}"]'}
 
 def filter_template_logic(code: str, allowed_components: set) -> str:
@@ -401,7 +399,7 @@ def filter_template_logic(code: str, allowed_components: set) -> str:
     return "\n".join(filtered_lines)
 
 def hydrator_node(state: GraphState, store: BaseStore):
-    print("--- [NODE] HYDRATOR (Context Assembly) ---")
+    print("--- [NODE] HYDRATOR context assembly ---")
 
     if state.get("error"):
         return {"error": state["error"]}

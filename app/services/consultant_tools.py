@@ -128,7 +128,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
                     "_score": score,
                 })
     except Exception as e:
-        print(f"[search_components] Template scan error: {e}")
+        print(f"--- [NODE] CONSULTANT TOOL ERROR template scan error: {e}")
 
     # ── Keyword: Component Scan ──
     try:
@@ -192,7 +192,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
                         "_score": score,
                     })
     except Exception as e:
-        print(f"[search_components] Component scan error: {e}")
+        print(f"--- [NODE] CONSULTANT TOOL ERROR component scan error: {e}")
 
     # ── Semantic Search (FAISS) ──
     try:
@@ -254,7 +254,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
                             })
     except Exception as e:
         warnings.append("Semantic search failed; returning keyword matches only.")
-        print(f"[search_components] FAISS search error: {e}")
+        print(f"--- [NODE] CONSULTANT TOOL ERROR faiss search error: {e}")
 
     # Sort keyword hits first (by score), then semantic hits
     results.sort(key=lambda x: x.get("_score", 0), reverse=True)
@@ -448,33 +448,31 @@ def _parse_include_statements(code: str) -> list:
 
 @tool
 def check_channel_compatibility(source_component_id: str, target_component_id: str, runtime: ToolRuntime) -> dict:
-    """Check if two components can be connected by comparing output channels
-    of the source with input channels of the target. Inspects actual Nextflow
-    source code from the code store to detect declared channel names in
-    take/emit blocks.
-    
-    Use this to verify data flow between consecutive pipeline steps.
+    """We check if two components can connect. We look at the output channels of the first one and the input channels of the second one. We read the real code to find the exact names.
     
     Args:
-        source_component_id: The upstream component ID (e.g. 'step_1PP_trimming__fastp')
-        target_component_id: The downstream component ID (e.g. 'step_2AS_mapping__bowtie')
+        source_component_id: The first component ID
+        target_component_id: The second component ID
     """
     store = runtime.store
     warnings = []
+    print(f"--- [NODE] CONSULTANT TOOL check channel compatibility between {source_component_id} and {target_component_id}")
     
-    # Load source component
+    # we load the first component
     source_comp = store.get(("components",), source_component_id)
     source_tmpl = store.get(("templates",), source_component_id) if not source_comp else None
     if not source_comp and not source_tmpl:
+        print(f"--- [NODE] CONSULTANT ERROR source {source_component_id} not found")
         return {"error": f"Source '{source_component_id}' not found in catalog"}
     
-    # Load target component
+    # we load the second component
     target_comp = store.get(("components",), target_component_id)
     target_tmpl = store.get(("templates",), target_component_id) if not target_comp else None
     if not target_comp and not target_tmpl:
+        print(f"--- [NODE] CONSULTANT ERROR target {target_component_id} not found")
         return {"error": f"Target '{target_component_id}' not found in catalog"}
     
-    # Get catalog-level channel info
+    # we get the channel info from the catalog
     if source_comp:
         source_data = source_comp.value
         source_outputs_catalog = source_data.get("output_channels", source_data.get("out", []))
@@ -489,7 +487,7 @@ def check_channel_compatibility(source_component_id: str, target_component_id: s
         target_data = target_tmpl.value
         target_inputs_catalog = target_data.get("input_channels", [])
     
-    # Parse actual source code for precise channel info
+    # we read the actual code to get the correct channel info
     source_code_item = store.get(("code",), source_component_id)
     target_code_item = store.get(("code",), target_component_id)
     
@@ -500,26 +498,28 @@ def check_channel_compatibility(source_component_id: str, target_component_id: s
     target_parsed = _parse_nextflow_channels(target_code)
     
     if source_parsed["partial"]:
-        warnings.append(f"Source '{source_component_id}' code may be partial/truncated — channel analysis may be incomplete")
+        warnings.append(f"Source '{source_component_id}' code may be partial so channel analysis may be incomplete")
     if target_parsed["partial"]:
-        warnings.append(f"Target '{target_component_id}' code may be partial/truncated — channel analysis may be incomplete")
+        warnings.append(f"Target '{target_component_id}' code may be partial so channel analysis may be incomplete")
     if not source_code:
-        warnings.append(f"No source code found for '{source_component_id}' — using catalog metadata only")
+        warnings.append(f"No source code found for '{source_component_id}'. using catalog metadata only")
     if not target_code:
-        warnings.append(f"No source code found for '{target_component_id}' — using catalog metadata only")
+        warnings.append(f"No source code found for '{target_component_id}'. using catalog metadata only")
     
-    # Use parsed channels if available, fall back to catalog
+    # we use the channels we found in the code. if we found nothing we use the catalog
     source_emits = source_parsed["emits"] if source_parsed["emits"] else source_outputs_catalog
     target_takes = target_parsed["takes"] if target_parsed["takes"] else target_inputs_catalog
     
-    # Check compatibility: look for matching or compatible channel names
+    print(f"--- [NODE] CONSULTANT TOOL source emits {source_emits}. target takes {target_takes}")
+
+    # we check if the channel names match exactly
     source_emit_lower = {ch.lower() for ch in source_emits}
     target_take_lower = {ch.lower() for ch in target_takes}
     
     exact_matches = source_emit_lower & target_take_lower
     
-    # Fuzzy match: check if channel types are semantically compatible
-    # e.g. "trimmed" output → "reads" input (common pattern)
+    # we do a fuzzy match here. we see if the channel types make sense together
+    # for example when a trimmed output connects to a reads input
     READ_COMPATIBLE = {"reads", "rawreads", "trimmed", "fastq", "filtered"}
     ASSEMBLY_COMPATIBLE = {"assembly", "contigs", "scaffolds", "consensus"}
     
@@ -531,12 +531,15 @@ def check_channel_compatibility(source_component_id: str, target_component_id: s
             if (s_ch in READ_COMPATIBLE and t_ch in READ_COMPATIBLE) or \
                (s_ch in ASSEMBLY_COMPATIBLE and t_ch in ASSEMBLY_COMPATIBLE):
                 fuzzy_matches.append({"source_emit": s_ch, "target_take": t_ch, "reason": "type-compatible"})
+                print(f"--- [NODE] CONSULTANT TOOL fuzzy match found for {s_ch} and {t_ch}")
     
     compatible = bool(exact_matches) or bool(fuzzy_matches) or (len(source_emits) > 0 and len(target_takes) > 0 and len(target_takes) == 1)
     
     if not compatible and len(target_takes) == 1:
-        warnings.append(f"Target takes a single channel '{target_takes[0]}' — may accept any upstream output by convention")
+        warnings.append(f"Target takes a single channel '{target_takes[0]}' so it may accept any upstream output by convention")
         compatible = True
+    
+    print(f"--- [NODE] CONSULTANT TOOL compatibility result is {compatible}")
     
     return {
         "compatible": compatible,
@@ -551,7 +554,7 @@ def check_channel_compatibility(source_component_id: str, target_component_id: s
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# TOOL 6: Validate a complete pipeline plan
+# TOOL 6 Validate a complete pipeline plan
 # ──────────────────────────────────────────────────────────────────────────────
 
 @tool
@@ -566,21 +569,24 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
     Pass template_id as empty string "" if no template is used.
     
     Args:
-        component_ids: List of component IDs in proposed execution order (e.g. ['step_1PP_trimming__fastp', 'step_2AS_mapping__bowtie'])
-        template_id: Template ID to compare against, or empty string if none
+        component_ids: List of component IDs in execution order
+        template_id: Template ID to compare against. keep it empty if there is no template
     """
     store = runtime.store
     issues = []
     warnings = []
     
+    print(f"--- [NODE] CONSULTANT TOOL check plan logic for {len(component_ids)} components with template {template_id}")
+    
     if not component_ids:
+        print("--- [NODE] CONSULTANT TOOL no component ids provided")
         return {
             "valid": False,
             "issues": ["No component IDs provided"],
             "warnings": [],
         }
     
-    # 1. Batch-validate all IDs exist
+    # we check if all ids are real
     valid_ids = []
     invalid_ids = []
     for comp_id in component_ids:
@@ -591,14 +597,16 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
         else:
             invalid_ids.append(comp_id)
             issues.append(f"Component '{comp_id}' not found in catalog")
+            
+    print(f"--- [NODE] CONSULTANT TOOL found {len(invalid_ids)} invalid ids")
     
-    # 2. Check channel flow between consecutive pairs
+    # we look at how the data flows between the steps
     channel_report = []
     for i in range(len(valid_ids) - 1):
         src_id = valid_ids[i]
         tgt_id = valid_ids[i + 1]
         
-        # Get channel info from catalog
+        # we get the channel info from the catalog
         src_comp = store.get(("components",), src_id)
         tgt_comp = store.get(("components",), tgt_id)
         
@@ -621,7 +629,7 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
             if tgt_tmpl:
                 tgt_inputs = tgt_tmpl.value.get("input_channels", [])
         
-        # Parse actual code for precise channel info
+        # we read the code to see the exact channels
         src_code_item = store.get(("code",), src_id)
         tgt_code_item = store.get(("code",), tgt_id)
         
@@ -635,7 +643,7 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
         effective_inputs = tgt_parsed["takes"] if tgt_parsed["takes"] else tgt_inputs
         
         if src_parsed["partial"] or tgt_parsed["partial"]:
-            warnings.append(f"Code for '{src_id}' → '{tgt_id}' may be partial — channel analysis approximate")
+            warnings.append(f"Code for '{src_id}' to '{tgt_id}' may be partial so channel analysis is approximate")
         
         pair_info = {
             "source": src_id,
@@ -645,25 +653,26 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
         }
         
         if not effective_outputs:
-            warnings.append(f"No output channels detected for '{src_id}' — cannot verify connection to '{tgt_id}'")
+            warnings.append(f"No output channels detected for '{src_id}' so we cannot verify connection to '{tgt_id}'")
         elif not effective_inputs:
-            warnings.append(f"No input channels detected for '{tgt_id}' — cannot verify connection from '{src_id}'")
+            warnings.append(f"No input channels detected for '{tgt_id}' so we cannot verify connection from '{src_id}'")
         else:
-            # Check for any overlap
+            # we check if the channels overlap
             out_lower = {ch.lower() for ch in effective_outputs}
             in_lower = {ch.lower() for ch in effective_inputs}
             if not (out_lower & in_lower):
                 pair_info["mismatch"] = True
                 warnings.append(
-                    f"Channel mismatch: '{src_id}' emits {effective_outputs} "
-                    f"but '{tgt_id}' takes {effective_inputs} — may need channel adaptation"
+                    f"Channel mismatch. '{src_id}' emits {effective_outputs} "
+                    f"but '{tgt_id}' takes {effective_inputs}. this may need channel adaptation"
                 )
         
         channel_report.append(pair_info)
     
-    # 3. Template comparison
+    # we compare the plan with the template
     template_coverage = None
     if template_id:
+        print(f"--- [NODE] CONSULTANT TOOL comparing plan with template {template_id}")
         tmpl_item = store.get(("templates",), template_id)
         if not tmpl_item:
             issues.append(f"Template '{template_id}' not found in catalog")
@@ -675,34 +684,34 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
             missing_from_plan = tmpl_steps - plan_steps
             extra_in_plan = plan_steps - tmpl_steps
             
-            # Also check include statements in template source code
+            # we also look at the include lines in the template code
             code_item = store.get(("code",), template_id)
             includes_from_code = []
             if code_item:
                 tmpl_code = code_item.value.get("content", "")
                 includes_from_code = _parse_include_statements(tmpl_code)
                 
-                # Filter to only step_/module_/multi_ prefixed includes
+                # we only keep the includes that look like steps or modules
                 code_steps = {inc for inc in includes_from_code 
                              if inc.startswith(("step_", "module_", "multi_"))}
                 
-                # Steps referenced in code but not in catalog steps_used
+                # steps we found in the code but not in the catalog list
                 code_only = code_steps - tmpl_steps
                 if code_only:
                     warnings.append(
                         f"Template code includes {list(code_only)} which are not in "
-                        f"the template's 'steps_used' metadata — may be helper dependencies"
+                        f"the template steps_used list. they may be helper dependencies"
                     )
                 
-                # Steps in code but missing from the plan
+                # steps we found in the code but not in our plan
                 code_missing = code_steps - plan_steps
                 if code_missing:
                     warnings.append(
                         f"Template code references {list(code_missing)} which are "
-                        f"not in your plan — verify these aren't needed"
+                        f"not in your plan. please verify these are not needed"
                     )
             else:
-                warnings.append(f"No source code found for template '{template_id}' — include analysis skipped")
+                warnings.append(f"No source code found for template '{template_id}'. include analysis skipped")
             
             template_coverage = {
                 "template_id": template_id,
@@ -715,11 +724,12 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
             
             if missing_from_plan:
                 warnings.append(
-                    f"Plan is missing template steps: {list(missing_from_plan)} — "
+                    f"Plan is missing template steps {list(missing_from_plan)}. "
                     f"these may be needed for correct pipeline logic"
                 )
     
     is_valid = len(issues) == 0
+    print(f"--- [NODE] CONSULTANT TOOL check plan logic finished. valid is {is_valid}")
     
     result = {
         "valid": is_valid,

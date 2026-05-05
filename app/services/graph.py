@@ -107,7 +107,7 @@ def compact_memory_node(state: GraphState):
         updates["tool_memory"] = merged_memory
     
     if updates:
-        print(f"[compact_memory] Compacted {len(delete_actions)} messages, extracted {len(new_facts)} tool facts")
+        print(f"--- [NODE] GRAPH compacted {len(delete_actions)} messages and got {len(new_facts)} facts")
         return updates
     return {}
 
@@ -139,7 +139,7 @@ def build_consultant_subgraph():
             # Safety: count tool messages to prevent infinite loops
             tool_msg_count = sum(1 for m in messages if isinstance(m, LCToolMessage))
             if tool_msg_count >= MAX_TOOL_ITERATIONS:
-                print(f"⚠️ Tool iteration limit ({MAX_TOOL_ITERATIONS}) reached. Forcing extraction.")
+                print(f"--- [NODE] GRAPH ERROR tool limit of {MAX_TOOL_ITERATIONS} reached. forcing extraction")
                 return "consultant_extract"
             return "tools"
         return "consultant_extract"

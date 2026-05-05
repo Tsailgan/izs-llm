@@ -4,7 +4,7 @@ from app.services.graph_state import GraphState
 from app.services.agents import ARCHITECT_SYSTEM_PROMPT
 
 def repair_node(state: GraphState):
-    print("--- [NODE] REPAIR ---")
+    print("--- [NODE] REPAIR repairing pipeline")
     error_msg = state.get("validation_error", "Unknown validation error.")
 
     repair_instruction = f"""

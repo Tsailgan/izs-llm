@@ -50,14 +50,13 @@ def _preflight_checks():
 
     if errors:
         print("\n" + "=" * 60)
-        print("❌ PREFLIGHT CHECK FAILED — Cannot run tests")
+        print("--- [TEST] ERROR preflight check failed so we cannot run tests")
         print("=" * 60)
         for e in errors:
             print(f"\n  • {e}")
         print()
         sys.exit(1)
-
-    print("✅ Preflight checks passed")
+    print("--- [TEST] preflight checks passed")
 
 
 _preflight_checks()
@@ -89,9 +88,9 @@ def store():
     pass directly to agents, hydrators, and helper functions.
     """
     _store = InMemoryStore()
-    print("\n📦 Loading the real vector store and catalog for testing...")
+    print("\n--- [TEST] loading the real vector store and catalog for testing")
     data_loader.load_all(store=_store)
-    print("✅ Database loaded successfully.")
+    print("--- [TEST] database loaded successfully")
     return _store
 
 
@@ -116,7 +115,7 @@ def setup_database(store):
     This is autouse — it runs once per session before any test, ensuring
     the store is populated even if no test explicitly requests it.
     """
-    print("✅ Database ready for testing.")
+    print("--- [TEST] database ready for testing")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -135,4 +134,4 @@ def finalize_report(request):
     """Save the markdown report after all tests complete."""
     yield
     report_path = report.save_report()
-    print(f"\n📋 Final report saved to: {report_path}")
+    print(f"\n--- [TEST] final report saved to {report_path}")
