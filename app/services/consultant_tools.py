@@ -7,7 +7,8 @@ instead of relying solely on bulk RAG context injection.
 """
 
 import re
-from langchain_core.tools import tool, ToolRuntime
+from langchain_core.tools import tool
+from langchain.tools import ToolRuntime
 from app.core.config import settings
 from app.core.loader import data_loader
 from app.services.query_normalizer import (
