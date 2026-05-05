@@ -347,12 +347,11 @@ def architect_generate_node(state: GraphState):
     if architect_findings:
         human_msg += f"\n\nPREVIOUS ATTEMPT ANALYSIS (fix these issues):\n{architect_findings}"
     
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", ARCHITECT_SYSTEM_PROMPT),
-        ("human", human_msg)
-    ])
-        
-    gen_messages = prompt.invoke({}).to_messages()
+    from langchain_core.messages import SystemMessage, HumanMessage
+    gen_messages = [
+        SystemMessage(content=ARCHITECT_SYSTEM_PROMPT),
+        HumanMessage(content=human_msg)
+    ]
 
     try:
         result = architect_agent.invoke(gen_messages)

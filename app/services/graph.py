@@ -12,7 +12,7 @@ from app.services.consultant_tools import CONSULTANT_TOOLS
 from app.services.architect_tools import ARCHITECT_TOOLS
 
 # Safety cap on tool-calling iterations to prevent runaway loops
-MAX_TOOL_ITERATIONS = 5
+MAX_TOOL_ITERATIONS = 8
 MAX_TOOL_ITERATIONS_APPROVAL = 0  # Tighter limit when user already approved
 
 # Approval keywords — if the user's message matches, limit tool calls
@@ -168,11 +168,10 @@ def build_consultant_subgraph():
             # Clean punctuation for matching
             clean_human = last_human_text.rstrip("!.,;:?")
             
-            # Only cut off tool calling if it's an explicit "approved" and we already have a plan
-            has_plan = bool(state.get("design_plan"))
-            is_approval = has_plan and (clean_human == "approved" or clean_human == "approve")
+            # Only cut off tool calling if it's strictly "approved"
+            is_approval = (clean_human == "approved")
             
-            print(f"--- [NODE] GRAPH routing: last_human='{clean_human}', has_plan={has_plan}, is_approval={is_approval}")
+            print(f"--- [NODE] GRAPH routing: last_human='{clean_human}', is_approval={is_approval}")
             
             effective_limit = MAX_TOOL_ITERATIONS_APPROVAL if is_approval else MAX_TOOL_ITERATIONS
             
