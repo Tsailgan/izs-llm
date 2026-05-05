@@ -162,14 +162,15 @@ def build_consultant_subgraph():
             
             # Clean punctuation for matching
             clean_human = last_human_text.rstrip("!.,;:?")
-            is_approval = clean_human in APPROVAL_PATTERNS or any(
-                p in last_human_text for p in ("approve", "go ahead", "looks good", "proceed", "confermo")
-            )
+            
+            # Only cut off tool calling if it's an explicit "approved" and we already have a plan
+            has_plan = bool(state.get("design_plan"))
+            is_approval = has_plan and (clean_human == "approved")
             
             effective_limit = MAX_TOOL_ITERATIONS_APPROVAL if is_approval else MAX_TOOL_ITERATIONS
             
             if tool_msg_count >= effective_limit:
-                print(f"--- [NODE] GRAPH tool limit of {effective_limit} reached (approval={is_approval}, count={tool_msg_count}). forcing extraction")
+                print(f"--- [NODE] GRAPH tool limit of {effective_limit} reached (approval={is_approval}, plan_exists={has_plan}, count={tool_msg_count}). forcing extraction")
                 return "consultant_extract"
             return "tools"
         return "consultant_extract"
