@@ -436,13 +436,13 @@ def build_test_execution_graph(store):
     """
     from langgraph.graph import StateGraph, END
     from app.services.graph_state import GraphState
-    from app.services.agents import hydrator_node, architect_node, diagram_node, deterministic_diagram_node
+    from app.services.agents import hydrator_node, architect_generate_node, diagram_node, deterministic_diagram_node
     from app.services.repair import repair_node, should_repair
     from app.services.renderer import renderer_node
 
     builder = StateGraph(GraphState)
     builder.add_node("hydrator", hydrator_node)
-    builder.add_node("architect", architect_node)
+    builder.add_node("architect", architect_generate_node)
     builder.add_node("repair", repair_node)
     builder.add_node("renderer", renderer_node)
     builder.add_node("diagram", diagram_node)

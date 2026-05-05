@@ -116,7 +116,7 @@ The brains of the operation. This hooks everything together.
 - **`agents.py`**: Contains the actual LLM wrappers and their continuously optimized **System Prompts**.
   - `consultant_node`: Merges the user request with RAG data to chat with the user. It explicitly verifies extracted `module_ids` and `template_id` directly against the RAG context data store to strip AI hallucinated tools out of the pipeline *before* they crash the executor.
   - `hydrator_node`: An algorithmic (non-LLM) node that evaluates the Consultant's `strategy_selector` (Exact Match, Adapted Match, Custom) and assembles the raw `code_store_hollow.jsonl` Groovy string into context for the Architect.
-  - `architect_node`: Instructed by highly tuned system prompts dictating internal Nextflow DSL idioms, translating the Consultant's `draft_plan` into the `NextflowPipelineAST`.
+  - `architect_generate_node`: Instructed by highly tuned system prompts dictating internal Nextflow DSL idioms, translating the Consultant's `draft_plan` into the `NextflowPipelineAST`.
   - `diagram_node`: Tells an LLM to read the final Groovy code and create nodes/edges.
 - **`llm.py`**: A factory function (`get_llm()`) that parses the configured `settings.LLM_MODEL` to return the appropriate LangChain Chat Model initialization (e.g., ChatHuggingFace vs ChatMistralAI).
 - **`tools.py`**: Contains the `retrieve_rag_context()` function, a highly robust **Hybrid Retrieval Engine**. It leverages an expanded multi-stage process:

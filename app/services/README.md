@@ -38,7 +38,7 @@ These files define the pipeline structure above.
 Contains the continuously optimized and robust System Prompts dictating the system's strict DSL2 behavior:
 * **`consultant_node`**: Interrogates the vector store. Output is actively cross-examined directly against the RAG store to verify `template_id`s and aggressively strip out hallucinated `module_ids` before returning to the planner graph, neutralizing false assumptions.
 * **`hydrator_node`**: An algorithmic parser (non-LLM). Modifies string interpolation. It evaluates the Consultant's `strategy_selector` (`EXACT_MATCH`, `ADAPTED_MATCH`, or `CUSTOM_BUILD`). For an adapted match, it runs a regex script (`filter_template_logic`) identifying lines of the source `.nf` template that don't match the newly selected modules and structurally comments them out `// [REMOVED BY PLAN]`.
-* **`architect_node`**: The heavy-lifting Node. It processes the Hydrator's assembled payload context alongside the Consultant's draft manual via a highly-tuned and extensively tested prompt matrix enforcing the Nextflow paradigm. It utilizes `with_structured_output` to build the strict logic mapping via AST JSON arrays.
+* **`architect_generate_node`**: The heavy-lifting Node. It processes the Hydrator's assembled payload context alongside the Consultant's draft manual via a highly-tuned and extensively tested prompt matrix enforcing the Nextflow paradigm. It utilizes `with_structured_output` to build the strict logic mapping via AST JSON arrays.
 * **`diagram_node`**: Receives the output `Nextflow` code from the Renderer, and compiles the text logic into a `DiagramData` mapping format for robust Mermaid rendering.
 
 ### `tools.py`
