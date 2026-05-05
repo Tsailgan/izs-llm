@@ -1,7 +1,38 @@
 import re
 import json
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage as LCToolMessage
+
+
+def _sanitize_messages_for_api(messages):
+    """Ensure every tool_call in the message history has a matching ToolMessage.
+    Mistral (and some other providers) reject requests where function calls and
+    responses don't pair up 1-to-1.  This adds lightweight stubs for any orphans.
+    
+    Returns a new list (does NOT mutate the originals).
+    """
+    answered_ids = set()
+    for msg in messages:
+        if isinstance(msg, LCToolMessage):
+            answered_ids.add(msg.tool_call_id)
+
+    patched = list(messages)
+    insert_offset = 0
+    for i, msg in enumerate(messages):
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            for tc in msg.tool_calls:
+                tc_id = tc.get("id") or tc.get("tool_call_id")
+                if tc_id and tc_id not in answered_ids:
+                    stub = LCToolMessage(
+                        content="[Tool call skipped — iteration limit reached]",
+                        tool_call_id=tc_id,
+                        name=tc.get("name", "unknown"),
+                    )
+                    # Insert the stub right after the AIMessage that made the call
+                    patched.insert(i + 1 + insert_offset, stub)
+                    insert_offset += 1
+                    answered_ids.add(tc_id)
+    return patched
 
 
 from app.models.ast_structure import NextflowPipelineAST
@@ -128,9 +159,13 @@ def consultant_node(state: GraphState, store: BaseStore):
     
     chain = prompt | llm_with_tools
     
+    # Sanitize messages: ensure every tool_call has a matching ToolMessage
+    # (Mistral API requires strict 1-to-1 pairing)
+    safe_messages = _sanitize_messages_for_api(current_messages)
+    
     try:
         result = chain.invoke({
-            "messages": current_messages
+            "messages": safe_messages
         })
         # the result is an aimessage that might have tool calls or just text
         print(f"--- [NODE] CONSULTANT tool calls: {len(result.tool_calls) if result.tool_calls else 0}")

@@ -12,19 +12,52 @@ from app.services.consultant_tools import CONSULTANT_TOOLS
 from app.services.architect_tools import ARCHITECT_TOOLS
 
 # Safety cap on tool-calling iterations to prevent runaway loops
-MAX_TOOL_ITERATIONS = 8
-MAX_TOOL_ITERATIONS_APPROVAL = 0  # Tighter limit when user already approved
-
-# Approval keywords — if the user's message matches, limit tool calls
-APPROVAL_PATTERNS = {
-    "yes", "approve", "approved", "go ahead", "looks good", "confirm",
-    "ok", "okay", "perfect", "do it", "proceed", "ship it", "lgtm",
-    "si", "sì", "va bene", "confermo",
-}
+MAX_TOOL_ITERATIONS = 10
+MAX_TOOL_ITERATIONS_APPROVAL = 5  # Tighter limit when user already approved
 
 # Memory compaction settings
 MEMORY_KEEP_LAST_N = 40      # Keep the last N messages without compaction
 MEMORY_MAX_TOOL_FACTS = 10   # Max structured tool facts to retain
+
+
+def sanitize_orphaned_tool_calls(state: GraphState):
+    """Inject stub ToolMessage responses for any AIMessage tool_calls that lack
+    a matching ToolMessage.  This prevents the Mistral API from rejecting the
+    history with 'Not the same number of function calls and responses'.
+    
+    Typically triggered when the tool-iteration safety cap forces routing away
+    from the tools node before all pending calls are answered.
+    """
+    messages = state.get("messages", [])
+    if not messages:
+        return {}
+
+    # Collect IDs of tool calls that already have a ToolMessage response
+    answered_ids = set()
+    for msg in messages:
+        if isinstance(msg, LCToolMessage):
+            answered_ids.add(msg.tool_call_id)
+
+    # Walk the messages and find unanswered tool calls
+    stub_messages = []
+    for msg in messages:
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            for tc in msg.tool_calls:
+                tc_id = tc.get("id") or tc.get("tool_call_id")
+                if tc_id and tc_id not in answered_ids:
+                    stub_messages.append(
+                        LCToolMessage(
+                            content="[Tool call skipped — iteration limit reached]",
+                            tool_call_id=tc_id,
+                            name=tc.get("name", "unknown"),
+                        )
+                    )
+                    answered_ids.add(tc_id)  # avoid duplicates
+
+    if stub_messages:
+        print(f"--- [NODE] SANITIZE injected {len(stub_messages)} stub ToolMessages for orphaned calls")
+        return {"messages": stub_messages}
+    return {}
 
 def check_consultant_status(state: GraphState):
     if state.get("consultant_status") == "APPROVED":
@@ -125,24 +158,25 @@ def build_consultant_subgraph():
     
     consultant → [tool_calls?] → tools → consultant (loop)
                     ↓ (no tool_calls)
-               consultant_extract → compact_memory → END
+               sanitize → consultant_extract → compact_memory → END
     """
     sub = StateGraph(GraphState)
     
     # Nodes
     sub.add_node("consultant", consultant_node)
     sub.add_node("tools", ToolNode(CONSULTANT_TOOLS, handle_tool_errors=True))
+    sub.add_node("sanitize", sanitize_orphaned_tool_calls)
     sub.add_node("consultant_extract", consultant_extract_node)
     sub.add_node("compact_memory", compact_memory_node)
     
     # Entry
     sub.set_entry_point("consultant")
     
-    # Routing: if consultant produced tool_calls → tools, else → extract
+    # Routing: if consultant produced tool_calls → tools, else → sanitize → extract
     def route_consultant(state: GraphState):
         messages = state.get("messages", [])
         if not messages:
-            return "consultant_extract"
+            return "sanitize"
         last_msg = messages[-1]
         if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
             # Count tool messages only since the last HumanMessage (per-turn reset)
@@ -177,19 +211,21 @@ def build_consultant_subgraph():
             
             if tool_msg_count >= effective_limit:
                 print(f"--- [NODE] GRAPH tool limit of {effective_limit} reached (is_approval={is_approval}, count={tool_msg_count}). forcing extraction")
-                return "consultant_extract"
+                return "sanitize"
             return "tools"
-        return "consultant_extract"
+        return "sanitize"
     
     sub.add_conditional_edges("consultant", route_consultant, {
         "tools": "tools",
-        "consultant_extract": "consultant_extract"
+        "sanitize": "sanitize"
     })
     
     # After tools execute, loop back to consultant for next reasoning step
     sub.add_edge("tools", "consultant")
     
-    # After extraction, clean up messages and exit
+    # After sanitizing orphaned tool calls, proceed to extraction
+    sub.add_edge("sanitize", "consultant_extract")
+    
     # After extraction, compact memory (lossless) and exit
     sub.add_edge("consultant_extract", "compact_memory")
     sub.add_edge("compact_memory", END)
