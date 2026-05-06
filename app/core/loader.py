@@ -52,6 +52,78 @@ class DataLoader:
                     store.put(("resources",), "helper_functions", {"list": self.res_list})
                     store.put(("resources",), "containers", {"list": self.containers_list})
 
+        # Build reverse index: component_id → list of templates that use it
+        if store:
+            self._build_usage_index(store)
+
+    def _build_usage_index(self, store):
+        """Build reverse index: for each component, find all templates that
+        include it and extract the relevant code snippet showing how it's wired.
+        Stored under ("usage", component_id) in the InMemoryStore.
+        """
+        import re
+        
+        # Collect: component_id → [{template_id, snippet}]
+        usage_map = {}
+        
+        for tmpl_id, tmpl_meta in self.tmpl_db.items():
+            tmpl_code = self.code_db.get(tmpl_id, "")
+            if not tmpl_code:
+                continue
+            
+            # Get steps from catalog + parse include statements from code
+            catalog_steps = set(tmpl_meta.get("steps_used", []))
+            code_includes = set()
+            for match in re.finditer(r"include\s*\{([^}]+)\}\s*from", tmpl_code):
+                block = match.group(1)
+                for item in block.split(';'):
+                    name = item.strip().split(' as ')[0].strip() if ' as ' in item else item.strip()
+                    if name and re.match(r'^(step_|multi_|module_)', name):
+                        code_includes.add(name)
+            
+            all_steps = catalog_steps | code_includes
+            
+            for comp_id in all_steps:
+                # Extract the snippet showing how this component is called
+                snippet = self._extract_usage_snippet(tmpl_code, comp_id)
+                
+                if comp_id not in usage_map:
+                    usage_map[comp_id] = []
+                usage_map[comp_id].append({
+                    "template_id": tmpl_id,
+                    "template_description": tmpl_meta.get("description", "")[:200],
+                    "snippet": snippet,
+                })
+        
+        # Store in the InMemoryStore
+        for comp_id, usages in usage_map.items():
+            store.put(("usage",), comp_id, {"usages": usages})
+        
+        print(f"✅ Usage index: {len(usage_map)} components mapped to templates")
+    
+    def _extract_usage_snippet(self, template_code: str, component_id: str) -> str:
+        """Extract lines around a component's usage in template code.
+        Returns the calling context (a few lines before/after) so the agent
+        can see how the component is wired (what channels go in/out).
+        """
+        lines = template_code.split('\n')
+        hit_lines = []
+        for i, line in enumerate(lines):
+            if component_id in line and 'include' not in line.lower():
+                hit_lines.append(i)
+        
+        if not hit_lines:
+            return "(component included but call site not found in code)"
+        
+        # Gather context: 2 lines before and 2 lines after each hit
+        context_indices = set()
+        for h in hit_lines:
+            for j in range(max(0, h - 2), min(len(lines), h + 3)):
+                context_indices.add(j)
+        
+        snippet_lines = [lines[i] for i in sorted(context_indices)]
+        return '\n'.join(snippet_lines).strip()
+
     def _load_vector_store(self):
         print(f"Loading Embeddings {settings.EMBEDDING_MODEL} (CPU)...")
         embeddings = HuggingFaceEmbeddings(

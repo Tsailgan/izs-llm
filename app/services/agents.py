@@ -2,6 +2,7 @@ import re
 import json
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage as LCToolMessage
+from app.core.config import settings
 
 
 def _sanitize_messages_for_api(messages):
@@ -145,13 +146,6 @@ def consultant_node(state: GraphState, store: BaseStore):
          If `code_available` is false, do not assume details; ask the user or suggest alternatives.
        Example: get_component_code("step_2AS_mapping__ivar")
     
-    ## MANDATORY WORKFLOW
-    1. When the user describes what they need → call `search_components` to find matching tools
-    2. Review the search results and suggest options to the user
-    3. Before finalizing any plan → call `verify_component_id` for EACH ID you will include
-    4. If adapting a template → call `get_template_logic` to understand its structure
-    5. If you need to understand data connections → call `get_component_code`
-    
      5. `check_channel_compatibility` — Call this to verify if two components can connect.
        It parses actual Nextflow source code to check take/emit channel compatibility.
        Example: check_channel_compatibility("step_1PP_trimming__fastp", "step_2AS_mapping__bowtie")
@@ -160,6 +154,19 @@ def consultant_node(state: GraphState, store: BaseStore):
        It validates the full pipeline: checks all IDs exist, channels connect properly,
        and template coverage is complete.
        Example: check_plan_logic(["step_1PP_trimming__fastp", "step_2AS_mapping__bowtie"], "module_draft_genome")
+    
+     7. `find_component_usage` — Call this to see HOW a component is used in existing templates.
+       Returns real production code snippets showing the wiring context (what channels feed it,
+       what comes before/after). Use this when building custom pipelines to reference proven patterns.
+       Example: find_component_usage("step_3TX_species__kmerfinder")
+    
+    ## MANDATORY WORKFLOW
+    1. When the user describes what they need → call `search_components` to find matching tools
+    2. Review the search results and suggest options to the user
+    3. Before finalizing any plan → call `verify_component_id` for EACH ID you will include
+    4. If adapting a template → call `get_template_logic` to understand its structure
+    5. If you need to understand data connections → call `get_component_code` or `find_component_usage`
+    6. For custom pipelines → call `find_component_usage` to see how components are wired in production
     
     CRITICAL: Do NOT suggest component IDs from memory. ALWAYS search or verify first.
     If tool results are empty or warnings appear, ask a clarifying question.
@@ -221,9 +228,9 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
         # has something to work with (happens when tool-limit forced extraction
         # before the consultant could produce a final text response).
         tool_summaries = []
-        for msg in reversed(messages[-30:]):
+        for msg in reversed(messages[-settings.CONTEXT_WINDOW_REPAIR:]):
             if hasattr(msg, 'type') and msg.type == 'tool' and msg.content:
-                tool_summaries.append(str(msg.content)[:400])
+                tool_summaries.append(str(msg.content)[:settings.MAX_TOOL_RESULT_PREVIEW])
             if len(tool_summaries) >= 5:
                 break
         if tool_summaries:
@@ -244,7 +251,7 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
     # Use a wide window to capture full multi-tool-call turns
     conversation_summary = []
     tool_memory_new = []
-    for msg in messages[-40:]:  # Last 40 messages for context
+    for msg in messages[-settings.CONTEXT_WINDOW_EXTRACT:]:  # Configurable context window
         if isinstance(msg, AIMessage):
             if msg.tool_calls:
                 for tc in msg.tool_calls:
@@ -252,7 +259,7 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
             if msg.content:
                 conversation_summary.append(f"[CONSULTANT] {msg.content}")
         elif hasattr(msg, 'type') and msg.type == 'tool':
-            result_str = str(msg.content)[:500] if msg.content else "(empty)"
+            result_str = str(msg.content)[:settings.MAX_TOOL_RESULT_PREVIEW] if msg.content else "(empty)"
             conversation_summary.append(f"[TOOL RESULT] {result_str}")
             if msg.content:
                 # Build structured fact for tool_memory
@@ -260,7 +267,7 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
                 tool_memory_new.append({
                     "tool": tool_name,
                     "args": "(from conversation)",
-                    "result": str(msg.content)[:400]
+                    "result": str(msg.content)[:settings.MAX_TOOL_RESULT_PREVIEW]
                 })
         elif isinstance(msg, HumanMessage):
             conversation_summary.append(f"[USER] {msg.content}")
@@ -327,7 +334,7 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
             "strategy_selector": result.strategy_selector if result.status == "APPROVED" else state.get("strategy_selector", "CUSTOM_BUILD"),
             "used_template_id": result.used_template_id if (result.status == "APPROVED" or is_hard_reset) else state.get("used_template_id"),
             "selected_module_ids": result.selected_module_ids if (result.status == "APPROVED" or is_hard_reset) else state.get("selected_module_ids", []),
-            "tool_memory": (state.get("tool_memory", []) or []) + tool_memory_new[-10:],
+            "tool_memory": (state.get("tool_memory", []) or []) + tool_memory_new[-settings.MEMORY_MAX_TOOL_FACTS:],
             "error": None
         }
 
@@ -417,7 +424,7 @@ def architect_generate_node(state: GraphState):
     # If we had a reasoning phase, extract the findings
     architect_findings = ""
     messages = state.get("messages", [])
-    for msg in reversed(messages[-10:]):
+    for msg in reversed(messages[-settings.CONTEXT_WINDOW_REASON:]):
         if isinstance(msg, AIMessage) and msg.content and not getattr(msg, 'tool_calls', None):
             # Check if this looks like architect reasoning (not consultant output)
             if any(kw in msg.content.lower() for kw in ("channel", "emit", "take", "connection", "validation")):
@@ -486,7 +493,7 @@ def diagram_node(state: GraphState):
         
     messages = prompt.invoke({"code": final_code}).to_messages()
 
-    max_retries = 3
+    max_retries = settings.MAX_DIAGRAM_RETRIES
     for attempt in range(max_retries):
         try:
             result = diagram_agent.invoke(messages)
@@ -506,8 +513,8 @@ def diagram_node(state: GraphState):
             messages.append(AIMessage(content="I generated an invalid JSON graph structure."))
             messages.append(HumanMessage(content=f"Validation Error: {str(e)}\nFix the data and try again."))
     
-    # If we failed after 3 attempts, we save the error to mermaid_agent
-    return {"mermaid_agent": "flowchart TD\n    Error[\"Agentic diagram generation failed after 3 attempts.\"]"}
+    # If we failed after retries, we save the error to mermaid_agent
+    return {"mermaid_agent": f"flowchart TD\\n    Error[\\\"Agentic diagram generation failed after {max_retries} attempts.\\\"]"}
     
 def deterministic_diagram_node(state: GraphState):
     print("--- [NODE] DIAGRAM deterministic ast to mermaid ---")
@@ -648,6 +655,21 @@ def hydrator_node(state: GraphState, store: BaseStore):
                 context_parts.append(f"[[REFERENCE FOR STEP: {comp_id}]]")
                 context_parts.append(f"Component ID: {comp_id}")
                 context_parts.append(f"```groovy\n{source_code.strip()}\n```")
+                
+                # Inject usage examples from production templates
+                usage_item = store.get(("usage",), comp_id)
+                if usage_item:
+                    usages = usage_item.value.get("usages", [])
+                    if usages:
+                        # Pick best snippet (first non-empty one, max 2)
+                        shown = 0
+                        for u in usages:
+                            snippet = u.get("snippet", "")
+                            if snippet and "(not found" not in snippet and shown < 2:
+                                context_parts.append(f"  USAGE EXAMPLE (from {u['template_id']}):")
+                                context_parts.append(f"  ```groovy\n  {snippet}\n  ```")
+                                shown += 1
+                
                 context_parts.append(f"[[END REFERENCE: {comp_id}]]")
                 for h in helper_names:
                     if h in source_code: detected_helpers.add(h)

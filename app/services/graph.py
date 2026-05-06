@@ -11,13 +11,15 @@ from app.services.renderer import renderer_node
 from app.services.consultant_tools import CONSULTANT_TOOLS
 from app.services.architect_tools import ARCHITECT_TOOLS
 
+from app.core.config import settings
+
 # Safety cap on tool-calling iterations to prevent runaway loops
-MAX_TOOL_ITERATIONS = 10
-MAX_TOOL_ITERATIONS_APPROVAL = 5  # Tighter limit when user already approved
+MAX_TOOL_ITERATIONS = settings.MAX_TOOL_ITERATIONS
+MAX_TOOL_ITERATIONS_APPROVAL = settings.MAX_TOOL_ITERATIONS_APPROVAL
 
 # Memory compaction settings
-MEMORY_KEEP_LAST_N = 40      # Keep the last N messages without compaction
-MEMORY_MAX_TOOL_FACTS = 10   # Max structured tool facts to retain
+MEMORY_KEEP_LAST_N = settings.MEMORY_KEEP_LAST_N
+MEMORY_MAX_TOOL_FACTS = settings.MEMORY_MAX_TOOL_FACTS
 
 
 def sanitize_orphaned_tool_calls(state: GraphState):
@@ -244,8 +246,8 @@ def build_execution_subgraph():
     sub.add_node("diagram", diagram_node)
     sub.add_node("deterministic_diagram", deterministic_diagram_node)
     
-    # Max tool iterations for architect reasoning
-    MAX_ARCHITECT_TOOL_ITERATIONS = 2
+    # Inner loop for tool calling
+    MAX_ARCHITECT_TOOL_ITERATIONS = settings.MAX_ARCHITECT_TOOL_ITERATIONS
     
     sub.set_entry_point("hydrator")
     sub.add_edge("hydrator", "architect_precheck")  # Deterministic channel/void check

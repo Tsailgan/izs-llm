@@ -101,7 +101,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
 
     # ── Keyword: Template Scan ──
     try:
-        for tmpl in store.search(("templates",), limit=100):
+        for tmpl in store.search(("templates",), limit=settings.SEARCH_SCAN_LIMIT):
             tmpl_id = tmpl.key.lower()
             tmpl_data = tmpl.value
             score = 0
@@ -134,7 +134,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
     # ── Keyword: Component Scan ──
     try:
         component_scores = {}
-        for comp in store.search(("components",), limit=100):
+        for comp in store.search(("components",), limit=settings.SEARCH_SCAN_LIMIT):
             comp_id = comp.key.lower()
             comp_data = comp.value
             score = 0
@@ -187,7 +187,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
                         "type": "component",
                         "tool": comp_data.get("tool"),
                         "domain": comp_data.get("domain"),
-                        "description": comp_data.get("description", "")[:120],
+                        "description": comp_data.get("description", "")[:settings.DESCRIPTION_TRUNCATE_COMP],
                         "inputs": comp_data.get("input_channels", comp_data.get("input_types", [])),
                         "outputs": comp_data.get("output_channels", comp_data.get("out", [])),
                         "_score": score,
@@ -233,7 +233,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
                             results.append({
                                 "id": item_id,
                                 "type": "template",
-                                "description": tmpl_data.get("description", "")[:150],
+                                "description": tmpl_data.get("description", "")[:settings.DESCRIPTION_TRUNCATE_TMPL],
                                 "steps_used": tmpl_data.get("steps_used", []),
                                 "_score": 0,
                                 "_semantic": True,
@@ -247,7 +247,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
                                 "type": "component",
                                 "tool": comp_data.get("tool"),
                                 "domain": comp_data.get("domain"),
-                                "description": comp_data.get("description", "")[:120],
+                                "description": comp_data.get("description", "")[:settings.DESCRIPTION_TRUNCATE_COMP],
                                 "inputs": comp_data.get("input_channels", comp_data.get("input_types", [])),
                                 "outputs": comp_data.get("output_channels", comp_data.get("out", [])),
                                 "_score": 0,
@@ -265,7 +265,7 @@ def search_components(query: str, runtime: ToolRuntime) -> list:
         r.pop("_score", None)
         r.pop("_semantic", None)
     
-    final_results = results[:15]
+    final_results = results[:settings.MAX_SEARCH_RESULTS]
     if warnings:
         final_results.append({"type": "meta", "warnings": warnings})
     return final_results
@@ -307,8 +307,8 @@ def get_template_logic(template_id: str, runtime: ToolRuntime) -> dict:
         code = code_item.value.get("content", "")
         result["code_available"] = bool(code)
         # Truncate very long code to avoid context explosion
-        if len(code) > 3000:
-            result["code_snippet"] = code[:3000] + "\n// ... (truncated)"
+        if len(code) > settings.MAX_CODE_DISPLAY_LENGTH:
+            result["code_snippet"] = code[:settings.MAX_CODE_DISPLAY_LENGTH] + "\n// ... (truncated)"
         else:
             result["code_snippet"] = code
     else:
@@ -749,6 +749,57 @@ def check_plan_logic(component_ids: list, template_id: str, runtime: ToolRuntime
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# TOOL 7: Find which templates use a component (reverse lookup)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@tool
+def find_component_usage(component_id: str, runtime: ToolRuntime) -> dict:
+    """Find which templates/modules use a specific component and HOW it is wired.
+    Returns real production code snippets showing the component's calling context
+    (what channels feed it, what comes before/after it in the workflow).
+    
+    Use this to understand the conventional way to connect a component,
+    especially when building custom pipelines with components you haven't used before.
+    
+    Args:
+        component_id: The exact component ID (e.g. 'step_3TX_species__kmerfinder')
+    """
+    store = runtime.store
+    
+    # Check the component exists first
+    comp = store.get(("components",), component_id)
+    tmpl = store.get(("templates",), component_id) if not comp else None
+    if not comp and not tmpl:
+        return {"error": f"Component '{component_id}' not found in catalog"}
+    
+    # Look up the pre-built usage index
+    usage_item = store.get(("usage",), component_id)
+    if not usage_item:
+        return {
+            "component_id": component_id,
+            "used_in_templates": [],
+            "note": "This component is not used in any template. You will need to wire it based on its take/emit channels."
+        }
+    
+    usages = usage_item.value.get("usages", [])
+    print(f"--- [NODE] CONSULTANT TOOL find_component_usage: {component_id} found in {len(usages)} templates")
+    
+    results = []
+    for u in usages:
+        results.append({
+            "template_id": u["template_id"],
+            "template_description": u.get("template_description", ""),
+            "usage_snippet": u.get("snippet", "(no snippet)"),
+        })
+    
+    return {
+        "component_id": component_id,
+        "used_in_templates": results,
+        "count": len(results),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # EXPORT: Tool list for ToolNode registration
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -759,4 +810,5 @@ CONSULTANT_TOOLS = [
     get_component_code,
     check_channel_compatibility,
     check_plan_logic,
+    find_component_usage,
 ]
