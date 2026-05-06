@@ -6,26 +6,26 @@ This module initializes the backend data connections before any API requests are
 
 ```mermaid
 flowchart TD
-        Config[core/config.py\nSettings + Paths] --> Loader
+  Config[core/config.py<br/>Settings + Paths] --> Loader
 
-        subgraph loader.py [DataLoader Singleton]
-                direction TB
-                LoadCode[Load code_store_hollow.jsonl]
-                LoadCat[Load Catalogs JSON]\ncomponents + templates
-                LoadRes[Load Resources JSON]\nhelper_functions + containers
-                BuildUsage[Build reverse usage index]\ncomponent -> templates
-                LoadVec[Load FAISS Vector DB]
+  subgraph loader_py[DataLoader Singleton]
+    direction TB
+    LoadCode[Load code_store_hollow.jsonl]
+    LoadCat[Load Catalogs JSON<br/>components + templates]
+    LoadRes[Load Resources JSON<br/>helper_functions + containers]
+    BuildUsage[Build reverse usage index<br/>component -> templates]
+    LoadVec[Load FAISS Vector DB]
 
-                LoadCode --> CodeDB[(Code Dict)]
-                LoadCat --> CompDB[(Component Dict)]
-                LoadCat --> TmplDB[(Template Dict)]
-                LoadRes --> Resources[(Helper + Containers)]
-                BuildUsage --> UsageIndex[(Usage Map)]
-                LoadVec --> Embeddings[HuggingFace Embeddings]
-        end
+    LoadCode --> CodeDB[(Code Dict)]
+    LoadCat --> CompDB[(Component Dict)]
+    LoadCat --> TmplDB[(Template Dict)]
+    LoadRes --> Resources[(Helper + Containers)]
+    BuildUsage --> UsageIndex[(Usage Map)]
+    LoadVec --> Embeddings[HuggingFace Embeddings]
+  end
 
-        Embeddings --> FAISS[(FAISS Index CPU)]
-        Loader --> Store[(LangGraph BaseStore)]
+  Embeddings --> FAISS[(FAISS Index CPU)]
+  Loader --> Store[(LangGraph BaseStore)]
 ```
 
 ## Files & Responsibilities
