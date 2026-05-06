@@ -2,9 +2,10 @@ from langchain_core.messages import HumanMessage
 from langgraph.graph import END
 from app.services.graph_state import GraphState
 from app.services.agents import ARCHITECT_SYSTEM_PROMPT
+from app.core.config import settings
 
 def repair_node(state: GraphState):
-    print("--- [NODE] REPAIR ---")
+    print("--- [NODE] REPAIR repairing pipeline")
     error_msg = state.get("validation_error", "Unknown validation error.")
 
     repair_instruction = f"""
@@ -24,7 +25,7 @@ def repair_node(state: GraphState):
     return {"messages": [HumanMessage(content=repair_instruction)]}
 
 def should_repair(state: GraphState):
-    MAX_RETRIES = 8
+    MAX_RETRIES = settings.MAX_REPAIR_RETRIES
     error = state.get("validation_error")
     retries = state.get("retries", 0)
 

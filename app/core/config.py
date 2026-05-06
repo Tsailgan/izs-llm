@@ -39,4 +39,28 @@ class Settings:
         "module_variant_lineage_ONE_LINE_FIX",
     }
 
+    # Graph & Agent Iteration Limits
+    MAX_TOOL_ITERATIONS = 15
+    MAX_TOOL_ITERATIONS_APPROVAL = 5
+    MAX_ARCHITECT_TOOL_ITERATIONS = 2
+    MAX_REPAIR_RETRIES = 8
+    MAX_DIAGRAM_RETRIES = 3
+
+    # Memory & Context Windows
+    MEMORY_KEEP_LAST_N = 40
+    MEMORY_MAX_TOOL_FACTS = 10
+    CONTEXT_WINDOW_EXTRACT = 40
+    CONTEXT_WINDOW_REASON = 10
+    CONTEXT_WINDOW_REPAIR = 30
+    
+    # Tool Result & Code Truncation
+    MAX_CODE_DISPLAY_LENGTH = 3000
+    MAX_TOOL_RESULT_PREVIEW = 500
+    MAX_SEARCH_RESULTS = 15
+    
+    # Search & Discovery
+    SEARCH_SCAN_LIMIT = 100
+    DESCRIPTION_TRUNCATE_TMPL = 150
+    DESCRIPTION_TRUNCATE_COMP = 120
+
 settings = Settings()
