@@ -9,16 +9,38 @@ def _sanitize_messages_for_api(messages):
     Mistral (and some other providers) reject requests where function calls and
     responses don't pair up 1-to-1.  This adds lightweight stubs for any orphans.
     
+    Also strips out orphaned architect-origin tool_call AIMessages that linger
+    in the state from a previous executor run (e.g. architect_reason_node).
+    These are identifiable by tool names that belong to the architect toolset
+    (lookup_component_code, verify_channel_connection, validate_body_code).
+    
     Returns a new list (does NOT mutate the originals).
     """
+    ARCHITECT_TOOL_NAMES = {"lookup_component_code", "verify_channel_connection", "validate_body_code"}
+    
     answered_ids = set()
     for msg in messages:
         if isinstance(msg, LCToolMessage):
             answered_ids.add(msg.tool_call_id)
 
-    patched = list(messages)
-    insert_offset = 0
+    # First pass: identify architect-origin AIMessages whose tool_calls are ALL
+    # unanswered — these are leftover from a prior executor run and should be
+    # stripped entirely rather than patched with stubs (they confuse the consultant).
+    architect_orphan_indices = set()
     for i, msg in enumerate(messages):
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            tc_names = {tc.get("name", "") for tc in msg.tool_calls}
+            tc_ids = {tc.get("id") or tc.get("tool_call_id") for tc in msg.tool_calls}
+            all_unanswered = all(tc_id not in answered_ids for tc_id in tc_ids if tc_id)
+            # If all tool calls are architect tools and all unanswered → drop
+            if tc_names <= ARCHITECT_TOOL_NAMES and all_unanswered:
+                architect_orphan_indices.add(i)
+
+    patched = []
+    for i, msg in enumerate(messages):
+        if i in architect_orphan_indices:
+            continue  # drop architect-origin orphaned messages entirely
+        patched.append(msg)
         if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
             for tc in msg.tool_calls:
                 tc_id = tc.get("id") or tc.get("tool_call_id")
@@ -28,9 +50,7 @@ def _sanitize_messages_for_api(messages):
                         tool_call_id=tc_id,
                         name=tc.get("name", "unknown"),
                     )
-                    # Insert the stub right after the AIMessage that made the call
-                    patched.insert(i + 1 + insert_offset, stub)
-                    insert_offset += 1
+                    patched.append(stub)
                     answered_ids.add(tc_id)
     return patched
 
@@ -197,10 +217,27 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
                 break
     
     if not last_ai_content:
-        return {
-            "messages": [AIMessage(content="I couldn't generate a response. Please try rephrasing your request.")],
-            "error": "No consultant response to extract from"
-        }
+        # Last resort: synthesize a summary from tool results so the extractor
+        # has something to work with (happens when tool-limit forced extraction
+        # before the consultant could produce a final text response).
+        tool_summaries = []
+        for msg in reversed(messages[-30:]):
+            if hasattr(msg, 'type') and msg.type == 'tool' and msg.content:
+                tool_summaries.append(str(msg.content)[:400])
+            if len(tool_summaries) >= 5:
+                break
+        if tool_summaries:
+            last_ai_content = (
+                "The consultant was investigating with tools but did not produce "
+                "a final text response. Here are the most recent tool results:\n"
+                + "\n---\n".join(reversed(tool_summaries))
+            )
+            print("--- [NODE] CONSULTANT EXTRACT synthesized reasoning from tool results")
+        else:
+            return {
+                "messages": [AIMessage(content="I couldn't generate a response. Please try rephrasing your request.")],
+                "error": "No consultant response to extract from"
+            }
 
     # Build context from the full conversation for the extractor
     # Include tool results so the extractor can see verified IDs
@@ -240,6 +277,10 @@ def consultant_extract_node(state: GraphState, store: BaseStore):
          "- If the consultant is still chatting (asking questions, suggesting options), set status to CHATTING\n"
          "- If the user approved the plan, set status to APPROVED and fill ALL fields\n"
          "- The response_to_user should be the consultant's final message to the user\n"
+         "- response_to_user MUST include substantive analysis. Do NOT just list component names.\n"
+         "  Explain WHY each component was chosen, how they connect, and any warnings from tool results.\n"
+         "- If tool results contain channel compatibility warnings or validation issues, INCLUDE them in the response.\n"
+         "- The draft_plan must be a detailed step-by-step instruction for the architect, not just a list of IDs.\n"
         ),
         ("human", "CONVERSATION CONTEXT:\n{context}\n\nFINAL CONSULTANT MESSAGE:\n{reasoning}")
     ])
