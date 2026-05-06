@@ -144,6 +144,14 @@ class ReportCollector:
         pct = (total_pass / len(self.results) * 100) if self.results else 0
         lines.append(f"| **Passed** | {total_pass} ✅ ({pct:.0f}%) |")
         lines.append(f"| **Failed** | {total_fail} ❌ |")
+
+        # calculate and show FSR (First-Submission Success Rate)
+        fsr_results = [r for r in self.results if "FSR_Success" in r["scores"]]
+        if fsr_results:
+            fsr_pass = sum(1 for r in fsr_results if r["scores"]["FSR_Success"] == 1.0)
+            fsr_total = len(fsr_results)
+            fsr_pct = (fsr_pass / fsr_total * 100) if fsr_total > 0 else 0
+            lines.append(f"| **First-Submission Success (FSR)** | {fsr_pass}/{fsr_total} pipelines ({fsr_pct:.1f}%) |")
         
         # Calculate aggregate RAG performance
         rag_results = [r for r in self.results if "rag_recall_pct" in r["scores"]]
@@ -282,10 +290,14 @@ class ReportCollector:
                     lines.append("**Evaluation Scores:**")
                     lines.append("")
                     for k, v in r["scores"].items():
-                        if "score" in k or "pct" in k:
+                        if "score" in k or "pct" in k or k == "FSR_Success":
                             label = k.replace("_", " ").title()
                             if isinstance(v, (int, float)):
-                                if "pct" in k:
+                                if k == "FSR_Success":
+                                    e = "✅" if v == 1.0 else "❌"
+                                    text_val = "Pass" if v == 1.0 else "Fail"
+                                    lines.append(f"- {e} {label}: **{text_val}**")
+                                elif "pct" in k:
                                     e = "🟢" if v >= 75 else "🟡" if v >= 50 else "🔴"
                                     lines.append(f"- {e} {label}: **{v}%**")
                                 else:

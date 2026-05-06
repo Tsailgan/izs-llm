@@ -169,6 +169,11 @@ def test_execution_subgraph(scenario, store, judge_llm):
         details["errors"] = errors
         print(f"\n[FAIL] {scenario['id']} test_execution failed:\n" + "\n".join(errors))
 
+    # The final passed status will be used as the FSR score
+    # 1.0 represents success, and 0.0 represents failure
+    scores["FSR_Success"] = 1.0 if passed else 0.0
+    details["is_first_submission_success"] = passed
+
     report.add_result(
         scenario_id=f"[Execution] {scenario['id']}",
         level=scenario["level"],
